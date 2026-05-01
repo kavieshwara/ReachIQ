@@ -1,5 +1,3 @@
-"use client";
-
 function normalizeUrl(value?: string | null) {
   if (!value) {
     return null;
