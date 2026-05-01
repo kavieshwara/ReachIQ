@@ -22,8 +22,24 @@ export async function GET(request: NextRequest) {
   }
 
   if (code) {
-    const supabase = createRouteHandlerClient({ cookies });
-    await supabase.auth.exchangeCodeForSession(code);
+    try {
+      const supabase = createRouteHandlerClient({ cookies });
+      const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+
+      if (exchangeError) {
+        throw exchangeError;
+      }
+    } catch {
+      const redirectUrl = new URL("/login", request.url);
+      redirectUrl.searchParams.set(
+        "authError",
+        "Google login could not be completed. Please verify the Supabase Google provider callback URLs and try again."
+      );
+      if (next && next.startsWith("/")) {
+        redirectUrl.searchParams.set("redirectedFrom", next);
+      }
+      return NextResponse.redirect(redirectUrl);
+    }
   }
 
   const destination = next && next.startsWith("/") ? next : "/dashboard";

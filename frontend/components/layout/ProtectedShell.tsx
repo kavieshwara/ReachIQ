@@ -186,9 +186,9 @@ export function ProtectedShell({
   }
 
   return (
-    <div className="min-h-screen lg:flex">
+    <div className="min-h-screen overflow-x-hidden lg:flex">
       {!adminOnly ? <Sidebar /> : null}
-      <div className="min-h-screen flex-1 pb-32 lg:pb-0">
+      <div className="min-h-screen flex-1 pb-40 lg:pb-0">
         <TopBar title={title} subtitle={subtitle} />
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-5 sm:py-8 lg:px-8">{children}</main>
       </div>

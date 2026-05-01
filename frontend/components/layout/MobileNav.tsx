@@ -97,7 +97,7 @@ export function MobileNav() {
       {moreOpen ? (
         <div
           ref={panelRef}
-          className="fixed inset-x-3 bottom-[5.8rem] z-40 max-h-[calc(100vh-8.5rem)] overflow-y-auto rounded-[28px] border border-white/10 bg-[#12121A]/96 p-3 shadow-[0_32px_80px_rgba(0,0,0,0.4)] backdrop-blur-xl lg:hidden"
+          className="fixed inset-x-3 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] z-40 max-h-[calc(100dvh-9rem)] overflow-y-auto rounded-[28px] border border-white/10 bg-[#12121A]/96 p-3 shadow-[0_32px_80px_rgba(0,0,0,0.4)] backdrop-blur-xl lg:hidden"
         >
           <div className="mb-3 flex items-start justify-between gap-4 px-2 py-1">
             <div>
@@ -141,7 +141,7 @@ export function MobileNav() {
         </div>
       ) : null}
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface/95 px-2 py-2 backdrop-blur lg:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-surface/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur lg:hidden">
       <div className="grid grid-cols-5 gap-2">
         {primaryItems.map((item) => {
           const Icon = item.icon;

@@ -80,9 +80,9 @@ export function FloatingChatbot() {
   };
 
   return (
-    <div className="pointer-events-none fixed bottom-6 right-6 z-40 flex flex-col items-end gap-3">
+    <div className="pointer-events-none fixed bottom-[calc(5.75rem+env(safe-area-inset-bottom))] right-4 z-50 flex max-w-[calc(100vw-1rem)] flex-col items-end gap-3 sm:bottom-6 sm:right-6">
       {open ? (
-        <div className="pointer-events-auto w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-[28px] border border-white/10 bg-surface/92 shadow-[0_32px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
+        <div className="pointer-events-auto flex w-[min(380px,calc(100vw-1rem))] max-h-[min(720px,calc(100dvh-8rem-env(safe-area-inset-bottom)))] flex-col overflow-hidden rounded-[28px] border border-white/10 bg-surface/92 shadow-[0_32px_90px_rgba(0,0,0,0.42)] backdrop-blur-2xl sm:max-h-[min(720px,calc(100dvh-3rem))]">
           <div className="flex items-center justify-between border-b border-white/8 px-5 py-4">
             <div className="flex items-center gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/12 text-primary">
@@ -123,7 +123,7 @@ export function FloatingChatbot() {
             </div>
           </div>
 
-          <div ref={scrollRef} className="scrollbar-thin flex h-[420px] flex-col gap-3 overflow-y-auto px-4 py-4">
+          <div ref={scrollRef} className="scrollbar-thin flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
             {!messages.length ? (
               <div className="rounded-3xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center">
                 <Sparkles className="mx-auto mb-3 h-6 w-6 text-primary" />
@@ -174,8 +174,8 @@ export function FloatingChatbot() {
                     void send();
                   }
                 }}
-                className="min-h-[96px] rounded-[22px]"
-                placeholder="Ask ReachIQ Assistant for pitch ideas, follow-up strategy, or product help…"
+                className="min-h-[72px] max-h-[140px] rounded-[22px]"
+                placeholder="Ask ReachIQ Assistant for pitch ideas, follow-up strategy, or product help..."
               />
               <Button className="h-12 w-12 shrink-0 rounded-2xl p-0" onClick={() => send()} disabled={loading}>
                 <SendHorizonal className="h-4 w-4" />

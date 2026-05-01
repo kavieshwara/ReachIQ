@@ -1,0 +1,61 @@
+services:
+  - type: web
+    name: reachiq-api
+    runtime: docker
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: FRONTEND_URL
+        sync: false
+      - key: FRONTEND_URLS
+        sync: false
+      - key: BACKEND_PUBLIC_URL
+        sync: false
+      - key: API_PUBLIC_URL
+        sync: false
+      - key: WEBSITE_PREVIEW_BASE_URL
+        sync: false
+      - key: SUPPORT_CONTACT_EMAIL
+        value: reachIQ.support@gmail.com
+      - key: WHATSAPP_API_VERSION
+        value: v18.0
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      - key: OVERPASS_API_URL
+        value: https://overpass-api.de/api/interpreter
+      - key: ENABLE_WEBSITE_VIDEO
+        value: "true"
+      - key: WEBSITE_VIDEO_DIR
+        value: .runtime/generated-videos
+      - key: WHATSAPP_QR_SESSION_DIR
+        value: .whatsapp-sessions
+      - key: DEMO_MODE
+        value: "false"
+      - key: ENABLE_QUEUES
+        value: "false"
+      - key: CRON_SECRET
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: SUPPORT_INBOX_EMAIL
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_CREDENTIAL_SECRET
+        sync: false

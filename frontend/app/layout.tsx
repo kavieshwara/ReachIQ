@@ -2,9 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import { PublicWhatsAppButton } from "@/components/shared/PublicWhatsAppButton";
+import { resolveStaticAppUrl } from "@/lib/public-url";
 import "./globals.css";
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+const appUrl = resolveStaticAppUrl();
 const logoVersion = "20260430";
 const canonicalBrandIcon = `/logo/brand-icon.png?v=${logoVersion}`;
 
@@ -33,6 +34,9 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   themeColor: "#6C63FF"
 };
 

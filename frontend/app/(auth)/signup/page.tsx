@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { FullPageAuthLoader } from "@/components/auth/FullPageAuthLoader";
 import { api } from "@/lib/api";
+import { buildBrowserAppUrl } from "@/lib/public-url";
 import { isDemoMode, isSupabaseConfigured, supabase, supabaseConfigMessage } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -105,7 +106,7 @@ function SignupPageContent() {
         email: values.email,
         password: values.password,
         options: {
-          emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`,
+          emailRedirectTo: buildBrowserAppUrl("/auth/callback"),
           data: {
             full_name: values.full_name
           }
@@ -193,7 +194,7 @@ function SignupPageContent() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?next=${encodeURIComponent("/dashboard")}`
+          redirectTo: buildBrowserAppUrl(`/auth/callback?next=${encodeURIComponent("/dashboard")}`)
         }
       });
 
@@ -285,7 +286,7 @@ function SignupPageContent() {
                       type: "signup",
                       email: pendingEmail,
                       options: {
-                        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback`
+                        emailRedirectTo: buildBrowserAppUrl("/auth/callback")
                       }
                     });
 

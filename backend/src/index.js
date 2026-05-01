@@ -58,7 +58,9 @@ const allowedOrigins = [
     .map((value) => value.trim())
     .filter(Boolean),
   "http://localhost:3000",
-  "https://localhost:3000"
+  "https://localhost:3000",
+  "http://localhost:3002",
+  "https://localhost:3002"
 ].filter(Boolean);
 
 function createLazyRouter(importer) {

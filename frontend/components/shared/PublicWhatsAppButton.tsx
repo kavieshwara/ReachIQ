@@ -36,7 +36,7 @@ export function PublicWhatsAppButton() {
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="fixed bottom-5 right-5 z-40 inline-flex items-center gap-3 rounded-full border border-accent/25 bg-accent px-5 py-3 text-sm font-semibold text-slate-950 shadow-[0_22px_70px_rgba(0,217,166,0.35)] transition hover:-translate-y-0.5 hover:scale-[1.01]"
+      className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-4 z-40 inline-flex items-center gap-3 rounded-full border border-accent/25 bg-accent px-4 py-3 text-sm font-semibold text-slate-950 shadow-[0_22px_70px_rgba(0,217,166,0.35)] transition hover:-translate-y-0.5 hover:scale-[1.01] sm:right-5 sm:px-5"
     >
       <span className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950/10">
         <MessageCircleMore className="h-5 w-5" />

@@ -12,12 +12,11 @@ RUN npm install --omit=dev \
 COPY . .
 
 ENV NODE_ENV=production
-ENV PORT=4001
+ENV PORT=10000
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-ENV ENABLE_WEBSITE_VIDEO=false
 
 RUN mkdir -p /data/whatsapp-sessions /data/generated-videos
 
-EXPOSE 4001
+EXPOSE 10000
 
 CMD ["npm", "start"]

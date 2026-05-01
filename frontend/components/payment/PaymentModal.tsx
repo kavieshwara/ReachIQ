@@ -39,7 +39,7 @@ export function PaymentModal({ isOpen, onClose, plan, userEmail, userName }: Pay
   const [transactionId, setTransactionId] = useState("");
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [upiId, setUpiId] = useState("reachiq@upi");
+  const [upiId, setUpiId] = useState("");
   const [upiQrUrl, setUpiQrUrl] = useState("");
   const [upiIntentUrl, setUpiIntentUrl] = useState("");
   const [qrTimer, setQrTimer] = useState(600);
@@ -296,11 +296,11 @@ export function PaymentModal({ isOpen, onClose, plan, userEmail, userName }: Pay
               animate={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, scale: 1, y: 0 }}
               exit={isMobile ? { opacity: 0, y: 60 } : { opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: "spring", damping: 25, stiffness: 260 }}
-              className="flex h-[100dvh] w-full max-w-[960px] overflow-hidden bg-white shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:h-auto sm:max-h-[90vh] sm:rounded-[24px]"
+              className="flex h-[100dvh] w-full max-w-[960px] overflow-hidden bg-white shadow-[0_32px_80px_rgba(0,0,0,0.6)] sm:h-auto sm:max-h-[min(90vh,860px)] sm:rounded-[24px]"
               onClick={(event) => event.stopPropagation()}
             >
               <div
-                className="relative hidden w-[320px] flex-shrink-0 flex-col overflow-hidden border-r border-white/6 px-7 py-7 sm:flex"
+                className="relative hidden w-[320px] flex-shrink-0 flex-col overflow-y-auto overflow-x-hidden border-r border-white/6 px-7 py-7 sm:flex"
                 style={{ background: "linear-gradient(160deg, #0A0A0F 0%, #12121A 60%, #0D0D18 100%)" }}
               >
                 <div
@@ -379,10 +379,10 @@ export function PaymentModal({ isOpen, onClose, plan, userEmail, userName }: Pay
                   <button
                     type="button"
                     onClick={onClose}
-                    className="rounded-full p-2 text-[#9898B8] transition hover:bg-[#F7F7FC] hover:text-[#1A1A2E]"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full p-2 text-[#9898B8] transition hover:bg-[#F7F7FC] hover:text-[#1A1A2E]"
                     aria-label="Close checkout"
                   >
-                    x
+                    <span className="text-lg leading-none">x</span>
                   </button>
                 </div>
 
@@ -544,7 +544,7 @@ export function PaymentModal({ isOpen, onClose, plan, userEmail, userName }: Pay
                         <div className="mt-5 flex flex-col gap-3 border-t border-[#F0F0F5] pt-4 sm:flex-row sm:items-center">
                           <div className="min-w-0 flex-1">
                             <p className="text-[11px] text-[#9898B8]">UPI ID</p>
-                            <p className="mt-1 truncate font-mono text-[14px] font-semibold text-[#1A1A2E]">{upiId}</p>
+                            <p className="mt-1 truncate font-mono text-[14px] font-semibold text-[#1A1A2E]">{upiId || "UPI ID unavailable"}</p>
                           </div>
                           <button
                             type="button"

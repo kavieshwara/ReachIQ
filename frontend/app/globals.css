@@ -10,6 +10,8 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -19,7 +21,8 @@ body {
     radial-gradient(circle at top right, rgba(77, 166, 255, 0.08), transparent 20%),
     radial-gradient(circle at bottom right, rgba(0, 217, 166, 0.1), transparent 24%),
     linear-gradient(180deg, rgba(255,255,255,0.02), transparent 22%);
-  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
 }
 
 body::before {
@@ -38,6 +41,14 @@ body::before {
 
 * {
   @apply border-border;
+  box-sizing: border-box;
+}
+
+img,
+svg,
+canvas,
+video {
+  max-width: 100%;
 }
 
 .reachiq-grid {

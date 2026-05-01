@@ -14,6 +14,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { FullPageAuthLoader } from "@/components/auth/FullPageAuthLoader";
+import { buildBrowserAppUrl } from "@/lib/public-url";
 import { isDemoMode, isSupabaseConfigured, supabase, supabaseConfigMessage } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -88,7 +89,7 @@ function LoginPageContent() {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/auth/callback?next=${encodeURIComponent(destination)}`
+          redirectTo: buildBrowserAppUrl(`/auth/callback?next=${encodeURIComponent(destination)}`)
         }
       });
 
