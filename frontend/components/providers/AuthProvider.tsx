@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { Suspense, useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useUserStore } from "@/store/useUserStore";
 import { FullPageAuthLoader } from "@/components/auth/FullPageAuthLoader";
@@ -36,7 +36,7 @@ function isAuthPage(pathname: string) {
   return ["/login", "/signup", "/forgot-password", "/verify-email", "/auth/callback"].some((route) => pathname === route || pathname.startsWith(`${route}/`));
 }
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+function AuthProviderContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname() ?? "";
   const searchParams = useSearchParams();
@@ -139,4 +139,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return <>{children}</>;
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<FullPageAuthLoader />}>{<AuthProviderContent>{children}</AuthProviderContent>}</Suspense>;
 }

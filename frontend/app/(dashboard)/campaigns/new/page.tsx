@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CampaignBuilder } from "@/components/campaigns/CampaignBuilder";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 
-export default function NewCampaignPage() {
+function NewCampaignPageContent() {
   const searchParams = useSearchParams();
   const [leads, setLeads] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -76,5 +76,22 @@ export default function NewCampaignPage() {
       initialTemplateId={searchParams?.get("templateId") || undefined}
       initialNiche={searchParams?.get("niche") || undefined}
     />
+  );
+}
+
+export default function NewCampaignPage() {
+  return (
+    <Suspense
+      fallback={
+        <Card>
+          <CardContent className="space-y-3 p-6">
+            <p className="text-lg font-semibold text-textPrimary">Preparing your campaign builder</p>
+            <p className="text-sm text-textSecondary">Loading your campaign setup...</p>
+          </CardContent>
+        </Card>
+      }
+    >
+      <NewCampaignPageContent />
+    </Suspense>
   );
 }

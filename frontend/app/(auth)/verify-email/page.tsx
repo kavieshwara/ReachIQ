@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
@@ -12,7 +12,7 @@ import { FullPageAuthLoader } from "@/components/auth/FullPageAuthLoader";
 import { isSupabaseConfigured, supabase, supabaseConfigMessage } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
-export default function VerifyEmailPage() {
+function VerifyEmailPageContent() {
   const router = useRouter();
   const params = useSearchParams();
   const email = params?.get("email") || "your email";
@@ -109,5 +109,13 @@ export default function VerifyEmailPage() {
         </CardContent>
       </Card>
     </main>
+  );
+}
+
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={<FullPageAuthLoader description="Loading email verification..." />}>
+      <VerifyEmailPageContent />
+    </Suspense>
   );
 }

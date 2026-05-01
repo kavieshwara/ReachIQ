@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type ChangeEvent, useEffect, useState } from "react";
+import { Suspense, type ChangeEvent, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -36,7 +36,7 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 
-export default function SignupPage() {
+function SignupPageContent() {
   const router = useRouter();
   const search = useSearchParams();
   const { authStatus } = useUserStore();
@@ -317,5 +317,13 @@ export default function SignupPage() {
         </CardContent>
       </Card>
     </main>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<FullPageAuthLoader description="Loading ReachIQ signup..." />}>
+      <SignupPageContent />
+    </Suspense>
   );
 }
