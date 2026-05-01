@@ -1,0 +1,10 @@
+.env
+.env.*
+node_modules
+npm-debug.log
+.runtime
+.whatsapp-sessions
+backend-run*.log
+backend-live*.log
+*.err.log
+*.out.log

@@ -1,0 +1,9 @@
+.env
+.env.*
+.next
+node_modules
+npm-debug.log
+frontend-run*.log
+frontend-live*.log
+*.err.log
+*.out.log
