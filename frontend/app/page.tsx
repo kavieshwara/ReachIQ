@@ -19,6 +19,7 @@ import { buildApiUrl } from "@/lib/api-base-url";
 import { DisclaimerBanner } from "@/components/shared/DisclaimerBanner";
 import { FullDisclaimer } from "@/components/shared/FullDisclaimer";
 import { PricingSection } from "@/components/pricing/PricingSection";
+import { DOCS_URL } from "@/lib/docs";
 
 const useCases = [
   ["Real Estate Agents", "Find landlords, pitch websites, and follow up automatically."],
@@ -89,7 +90,15 @@ export default function LandingPage() {
                   View Pricing
                 </Button>
               </Link>
+              <a href={DOCS_URL} target="_blank" rel="noreferrer">
+                <Button variant="secondary" className="px-6 py-3 text-base">
+                  Browse Docs
+                </Button>
+              </a>
             </div>
+            <p className="mt-4 text-sm text-textSecondary">
+              Want to see the full workflow before signing up? Read the hosted product docs and setup guides.
+            </p>
           </div>
         </section>
 
@@ -135,6 +144,9 @@ export default function LandingPage() {
         <section id="features" className="py-14">
           <div className="mb-8">
             <p className="text-2xl font-semibold text-textPrimary">Everything in one outreach stack</p>
+            <p className="mt-2 text-textSecondary">
+              Prefer a guided walkthrough? The ReachIQ docs cover setup, campaigns, payments, and WhatsApp connection end to end.
+            </p>
           </div>
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
             {features.map(([title, Icon]) => {
@@ -150,6 +162,14 @@ export default function LandingPage() {
                 </Card>
               );
             })}
+          </div>
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <a href={DOCS_URL} target="_blank" rel="noreferrer">
+              <Button>Open Docs</Button>
+            </a>
+            <p className="text-sm text-textSecondary">
+              Hosted on Docsio so new users can learn the platform without leaving the ReachIQ brand flow.
+            </p>
           </div>
         </section>
 

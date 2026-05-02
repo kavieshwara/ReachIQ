@@ -11,6 +11,8 @@ function normalizeUrl(value?: string | null) {
   return trimmed.replace(/\/$/, "");
 }
 
+const preferredHostedAppUrl = "https://reachiq-zeta.vercel.app";
+
 export function resolveStaticAppUrl() {
   const explicitUrl = normalizeUrl(process.env.NEXT_PUBLIC_APP_URL);
   const looksLocal = explicitUrl ? /localhost|127\.0\.0\.1/i.test(explicitUrl) : false;
@@ -22,6 +24,10 @@ export function resolveStaticAppUrl() {
 
   if (vercelUrl) {
     return vercelUrl.startsWith("http") ? vercelUrl : `https://${vercelUrl}`;
+  }
+
+  if (process.env.VERCEL_ENV === "production") {
+    return preferredHostedAppUrl;
   }
 
   if (explicitUrl) {

@@ -1,5 +1,5 @@
 import { generatePersonalizedOutreachMessage } from "./geminiService.js";
-import { generateWebsite } from "./websiteService.js";
+import { generateWebsite, resolveGeneratedWebsitePreviewUrl } from "./websiteService.js";
 import { captureGeneratedWebsiteVideo, isWebsiteVideoEnabled } from "./videoCaptureService.js";
 import { interpolateTemplate, nowIso } from "../utils/helpers.js";
 import { supabaseAdmin } from "../utils/supabase.js";
@@ -264,24 +264,44 @@ async function resolveWebsiteTemplate(campaign, lead, preparation, automationCon
 
 async function ensureWebsitePrepared({ campaign, campaignLead, lead, preparation, automationConfig, shouldAutoGenerateAssets }) {
   if (!shouldAutoGenerateAssets) {
+    const normalizedWebsiteUrl = resolveGeneratedWebsitePreviewUrl({
+      websiteId: preparation.generated_website_id,
+      liveUrl: preparation.website_live_url
+    });
     return {
       preparation: await upsertPreparation(campaign.id, campaignLead.id, {
         ...preparation,
         website_status: "skipped",
         generated_website_id: preparation.generated_website_id || null,
-        website_live_url: preparation.website_live_url || null
+        website_live_url: normalizedWebsiteUrl || null
       }),
-      websiteUrl: preparation.website_live_url || "",
+      websiteUrl: normalizedWebsiteUrl,
       generatedWebsiteId: preparation.generated_website_id || null
     };
   }
 
-  if (preparation.website_status === "ready" && preparation.website_live_url) {
+  if (preparation.website_status === "ready" && (preparation.website_live_url || preparation.generated_website_id)) {
+    const normalizedWebsiteUrl = resolveGeneratedWebsitePreviewUrl({
+      websiteId: preparation.generated_website_id,
+      liveUrl: preparation.website_live_url
+    });
+
+    const nextPreparation =
+      normalizedWebsiteUrl && normalizedWebsiteUrl !== preparation.website_live_url
+        ? await upsertPreparation(campaign.id, campaignLead.id, {
+            ...preparation,
+            user_id: campaign.user_id,
+            campaign_id: campaign.id,
+            lead_id: lead.id,
+            website_live_url: normalizedWebsiteUrl
+          })
+        : preparation;
+
     return {
-      preparation,
-      websiteUrl: preparation.website_live_url,
+      preparation: nextPreparation,
+      websiteUrl: normalizedWebsiteUrl,
       generatedWebsiteId: preparation.generated_website_id || null
-      };
+    };
   }
 
   const template = await resolveWebsiteTemplate(campaign, lead, preparation, automationConfig);

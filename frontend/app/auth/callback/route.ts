@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if (error) {
     const redirectUrl = new URL("/login", request.url);
     const safeMessage = errorDescription?.includes("exchange external code")
-      ? "Google login could not be completed. Please check the Google Client ID, client secret, and Supabase callback URL setup."
+      ? "Google login could not be completed. Check the Supabase Google client settings, the Supabase callback URL in Google Cloud, and make sure this Google account is allowed as a test user if the OAuth app is still in testing."
       : errorDescription || "Google login could not be completed right now.";
     redirectUrl.searchParams.set("authError", safeMessage);
     if (next && next.startsWith("/")) {
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       const redirectUrl = new URL("/login", request.url);
       redirectUrl.searchParams.set(
         "authError",
-        "Google login could not be completed. Please verify the Supabase Google provider callback URLs and try again."
+        "Google login could not be completed. Verify the Supabase Google provider settings, the Google Cloud redirect URI, and whether this Google account is allowed to use the OAuth app."
       );
       if (next && next.startsWith("/")) {
         redirectUrl.searchParams.set("redirectedFrom", next);

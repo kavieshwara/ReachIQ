@@ -34,6 +34,28 @@ export function buildGeneratedWebsitePreviewUrl(websiteId) {
   return `${buildPreviewBaseUrl()}/preview/${websiteId}`;
 }
 
+export function resolveGeneratedWebsitePreviewUrl({ websiteId, liveUrl }) {
+  if (websiteId) {
+    return buildGeneratedWebsitePreviewUrl(websiteId);
+  }
+
+  const normalizedLiveUrl = String(liveUrl || "").trim();
+  if (!normalizedLiveUrl) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(normalizedLiveUrl);
+    if (parsed.pathname.startsWith("/preview/")) {
+      return `${buildPreviewBaseUrl()}${parsed.pathname}${parsed.search}`;
+    }
+  } catch {
+    // Ignore invalid URLs and fall back to the stored value.
+  }
+
+  return normalizedLiveUrl;
+}
+
 export async function getGeneratedWebsitePreviewHtml(websiteId) {
   const { data, error } = await supabaseAdmin
     .from("generated_websites")

@@ -12,15 +12,24 @@ import { formatDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 
 function resolvePreviewUrl(preparation: any) {
+  if (preparation?.generated_website_id) {
+    return buildApiUrl(`/preview/${preparation.generated_website_id}`);
+  }
+
   if (preparation?.website_live_url) {
+    try {
+      const parsed = new URL(preparation.website_live_url);
+      if (parsed.pathname.startsWith("/preview/")) {
+        return buildApiUrl(`${parsed.pathname}${parsed.search}`);
+      }
+    } catch {
+      // Ignore invalid URLs and fall back to the stored value below.
+    }
+
     return preparation.website_live_url;
   }
 
-  if (!preparation?.generated_website_id) {
-    return "";
-  }
-
-  return buildApiUrl(`/preview/${preparation.generated_website_id}`);
+  return "";
 }
 
 function formatPreparationStatus(kind: "website" | "message" | "video", value?: string | null) {

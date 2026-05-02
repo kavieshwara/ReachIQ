@@ -3,7 +3,7 @@ import multer from "multer";
 import { requireAuth } from "../middleware/auth.js";
 import { requireAdmin } from "../middleware/adminOnly.js";
 import { supabaseAdmin } from "../utils/supabase.js";
-import { buildGeneratedWebsitePreviewUrl, generateWebsite } from "../services/websiteService.js";
+import { buildGeneratedWebsitePreviewUrl, generateWebsite, resolveGeneratedWebsitePreviewUrl } from "../services/websiteService.js";
 import { ensureStarterWebsiteTemplates } from "../data/starterWebsiteTemplates.js";
 import { createDemoGeneratedWebsite, getDemoGeneratedWebsites, getDemoWebsiteTemplates, isDemoMode } from "../utils/demo.js";
 
@@ -48,7 +48,10 @@ function getTemplatePayload(req) {
 function normalizeGeneratedWebsiteLinks(rows = []) {
   return rows.map((item) => ({
     ...item,
-    live_url: item?.id ? buildGeneratedWebsitePreviewUrl(item.id) : item.live_url
+    live_url: resolveGeneratedWebsitePreviewUrl({
+      websiteId: item?.id,
+      liveUrl: item?.live_url
+    })
   }));
 }
 
