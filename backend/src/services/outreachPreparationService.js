@@ -546,15 +546,26 @@ async function ensureVideoPrepared({
 
 export async function prepareCampaignLeadOutreach({ campaign, campaignLead, lead }) {
   const automationConfig = await getCampaignAutomationConfig(campaign.id);
-  const shouldAutoGenerateAssets = Boolean(
-    campaign.auto_generate_assets ??
-      automationConfig?.autoGenerateAssets ??
-      campaign.website_template_id ??
-      automationConfig?.websiteTemplateId
-  );
-  const requiresVideoAssets = Boolean(
-    campaign.require_video_assets ?? automationConfig?.requireVideoAssets
-  );
+  const hasExplicitAssetDisable =
+    campaign.auto_generate_assets === false ||
+    automationConfig?.autoGenerateAssets === false;
+  const defaultVideoAssets = String(process.env.ENABLE_WEBSITE_VIDEO || "true").toLowerCase() !== "false";
+  const shouldAutoGenerateAssets = hasExplicitAssetDisable
+    ? false
+    : Boolean(
+        campaign.auto_generate_assets ??
+          automationConfig?.autoGenerateAssets ??
+          campaign.website_template_id ??
+          automationConfig?.websiteTemplateId ??
+          true
+      );
+  const requiresVideoAssets = hasExplicitAssetDisable
+    ? false
+    : Boolean(
+        campaign.require_video_assets ??
+          automationConfig?.requireVideoAssets ??
+          defaultVideoAssets
+      );
 
   let preparation = await getCampaignPreparation(campaign.id, campaignLead.id);
   if (!preparation) {

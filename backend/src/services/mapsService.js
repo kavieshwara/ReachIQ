@@ -23,6 +23,8 @@ const OVERPASS_TIMEOUT_MS = Number(process.env.OVERPASS_TIMEOUT_MS || 18000);
 const SERPER_TIMEOUT_MS = Number(process.env.SERPER_TIMEOUT_MS || 12000);
 const OUTSCRAPER_TIMEOUT_MS = Number(process.env.OUTSCRAPER_TIMEOUT_MS || 15000);
 const WEBSITE_CHECK_TIMEOUT_MS = Number(process.env.WEBSITE_CHECK_TIMEOUT_MS || 9000);
+const SERPER_EARLY_RETURN_TIMEOUT_MS = Number(process.env.SERPER_EARLY_RETURN_TIMEOUT_MS || 9000);
+const OVERPASS_EARLY_RETURN_TIMEOUT_MS = Number(process.env.OVERPASS_EARLY_RETURN_TIMEOUT_MS || 12000);
 
 const nicheToOSMTag = {
   "dental clinic": { key: "amenity", value: "dentist" },
@@ -426,6 +428,25 @@ async function fetchJson(url, options = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS
   return json;
 }
 
+async function settleWithin(promise, timeoutMs, label) {
+  let timer = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export async function searchOverpass(niche, city, limit = 20) {
   const normalizedNiche = normalizeNiche(niche);
   const normalizedCity = normalizeCity(city);
@@ -664,26 +685,57 @@ export async function searchBusinesses({ niche, city, limit = 20 }) {
   const overpassLimit = Math.max(limit * 4, 80);
 
   console.log(`[Maps] Trying hybrid search for: ${normalizedNiche} in ${normalizedCity}`);
-  const [serperAttempt, overpassAttempt] = await Promise.allSettled([
-    searchSerper(normalizedNiche, normalizedCity, Math.max(limit * 2, 40)),
-    searchOverpass(normalizedNiche, normalizedCity, overpassLimit)
-  ]);
 
-  const serperResults = serperAttempt.status === "fulfilled" ? serperAttempt.value : [];
-  const overpassResults = overpassAttempt.status === "fulfilled" ? overpassAttempt.value : [];
+  let serperResults = [];
+  let overpassResults = [];
+
+  try {
+    serperResults = await settleWithin(
+      searchSerper(normalizedNiche, normalizedCity, Math.max(limit * 2, 40)),
+      SERPER_EARLY_RETURN_TIMEOUT_MS,
+      "Serper"
+    );
+  } catch (error) {
+    console.warn("[Maps] Serper failed:", error.message || error);
+    errors.push(`Serper: ${error.message || error}`);
+  }
+
+  if (serperResults.length) {
+    const prioritizedSerper = prioritizeLeadResults(serperResults);
+    const enoughFastResults =
+      serperResults.length >= Math.min(Math.max(limit, 5), 12) ||
+      prioritizedSerper.contactReadyNoWebsite.length >= Math.min(Math.max(Math.ceil(limit / 2), 2), 8);
+
+    if (enoughFastResults) {
+      const trimmedResults = sanitizeBusinesses(
+        prioritizedSerper.ordered.slice(0, limit),
+        normalizedCity,
+        normalizedNiche
+      );
+      console.log(
+        `[Maps] Returning fast Serper results for ${normalizedNiche} in ${normalizedCity}: total=${trimmedResults.length}, contactReadyNoWebsite=${prioritizedSerper.contactReadyNoWebsite.length}`
+      );
+      return {
+        results: trimmedResults,
+        source: "google_maps_via_serper"
+      };
+    }
+  }
+
+  try {
+    overpassResults = await settleWithin(
+      searchOverpass(normalizedNiche, normalizedCity, overpassLimit),
+      OVERPASS_EARLY_RETURN_TIMEOUT_MS,
+      "Overpass"
+    );
+  } catch (error) {
+    console.warn("[Maps] Overpass failed:", error.message || error);
+    errors.push(`Overpass: ${error.message || error}`);
+  }
+
   console.log(
     `[Maps] Hybrid source counts for ${normalizedNiche} in ${normalizedCity}: serper=${serperResults.length}, overpass=${overpassResults.length}`
   );
-
-  if (serperAttempt.status === "rejected") {
-    console.warn("[Maps] Serper failed:", serperAttempt.reason?.message || serperAttempt.reason);
-    errors.push(`Serper: ${serperAttempt.reason?.message || serperAttempt.reason}`);
-  }
-
-  if (overpassAttempt.status === "rejected") {
-    console.warn("[Maps] Overpass failed:", overpassAttempt.reason?.message || overpassAttempt.reason);
-    errors.push(`Overpass: ${overpassAttempt.reason?.message || overpassAttempt.reason}`);
-  }
 
   if (serperResults.length || overpassResults.length) {
     const verifiedOverpassResults =

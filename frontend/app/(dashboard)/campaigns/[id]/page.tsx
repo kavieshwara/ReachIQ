@@ -189,6 +189,13 @@ export default function CampaignDetailPage() {
     const preparation = preparationByLead.get(item.id);
     return isReconnectableWhatsAppError(item?.error_message) || isReconnectableWhatsAppError(preparation?.generation_error);
   });
+  const isLegacyHostedFailureCampaign =
+    !campaign.automation_config &&
+    !(campaign.outreach_preparations || []).length &&
+    (campaign.campaign_leads || []).some((item: any) =>
+      /request failed with status code 503/i.test(String(item?.error_message || "")) ||
+      /generated website preview/i.test(String(item?.error_message || ""))
+    );
   const automationConfig = campaign.automation_config || {};
   const assetsDisabledForCampaign = automationConfig.autoGenerateAssets === false;
   const videoDisabledForCampaign = automationConfig.requireVideoAssets === false;
@@ -308,6 +315,14 @@ export default function CampaignDetailPage() {
                 {videoDisabledForCampaign
                   ? "Video capture was also turned off for this campaign, so ReachIQ will only prepare the message until you create a new campaign with video enabled."
                   : "Video capture is active for this campaign."}
+              </p>
+            </div>
+          ) : null}
+          {isLegacyHostedFailureCampaign ? (
+            <div className="rounded-xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-textSecondary">
+              <p className="font-medium text-textPrimary">This looks like an older hosted run from before the backend repair.</p>
+              <p className="mt-1">
+                Click <span className="font-medium text-textPrimary">Launch</span> once more and ReachIQ will regenerate website, message, and video assets on the current live backend before it tries to send.
               </p>
             </div>
           ) : null}
