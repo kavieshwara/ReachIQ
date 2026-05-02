@@ -68,7 +68,7 @@ export function CampaignBuilder({
     lead_ids: [] as string[],
     website_template_id: "",
     auto_generate_assets: true,
-    require_video_assets: false,
+    require_video_assets: true,
     niche: initialNiche || ""
   });
 
@@ -93,6 +93,30 @@ export function CampaignBuilder({
       setNicheFilter(selectedTemplate.niche);
     }
   }, [selectedTemplateId, templates]);
+
+  useEffect(() => {
+    if (payload.website_template_id || !websiteTemplates.length) {
+      return;
+    }
+
+    const matchingTemplate =
+      websiteTemplates.find((template) => matchesNiche(template.niche, nicheFilter || payload.niche)) ||
+      websiteTemplates[0];
+
+    if (!matchingTemplate) {
+      return;
+    }
+
+    setPayload((current) => ({
+      ...current,
+      website_template_id: matchingTemplate.id,
+      niche: matchingTemplate.niche || current.niche
+    }));
+
+    if (matchingTemplate.niche && !nicheFilter) {
+      setNicheFilter(matchingTemplate.niche);
+    }
+  }, [nicheFilter, payload.niche, payload.website_template_id, websiteTemplates]);
 
   const uniqueLeadNiches = useMemo(
     () => Array.from(new Set(leads.map((lead) => String(lead.niche || "").trim()).filter(Boolean))).sort(),
@@ -249,7 +273,7 @@ export function CampaignBuilder({
             <label className="flex items-center justify-between rounded-xl border border-border bg-surface2 px-4 py-3 text-sm">
               <div>
                 <p className="font-medium text-textPrimary">Prepare website video asset</p>
-                <p className="text-textSecondary">The backend stores the video-preparation status per lead. Video capture setup can be enabled separately.</p>
+                <p className="text-textSecondary">Video capture now defaults on for new campaigns so each lead can get a hosted website preview and recorded demo asset.</p>
               </div>
               <input
                 type="checkbox"

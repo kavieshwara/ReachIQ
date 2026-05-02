@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { FullPageAuthLoader } from "@/components/auth/FullPageAuthLoader";
 import { api } from "@/lib/api";
-import { buildBrowserAppUrl } from "@/lib/public-url";
+import { buildBrowserAppUrl, preferredHostedAppUrl, resolveBrowserAppUrl } from "@/lib/public-url";
 import { isDemoMode, isSupabaseConfigured, supabase, supabaseConfigMessage } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -60,6 +60,20 @@ function SignupPageContent() {
       router.replace(destination);
     }
   }, [authStatus, destination, router]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const currentOrigin = window.location.origin.replace(/\/$/, "");
+    const canonicalOrigin = resolveBrowserAppUrl();
+    const isHostedMismatch = currentOrigin !== canonicalOrigin && /vercel\.app$/i.test(window.location.hostname);
+
+    if (isHostedMismatch) {
+      window.location.replace(`${preferredHostedAppUrl}${window.location.pathname}${window.location.search}${window.location.hash}`);
+    }
+  }, []);
 
   const handlePasswordChange = (event: ChangeEvent<HTMLInputElement>) => {
     form.register("password").onChange(event);

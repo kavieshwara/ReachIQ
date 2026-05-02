@@ -54,6 +54,7 @@ router.post("/", async (req, res, next) => {
       return res.status(201).json(createDemoCampaign(req.body));
     }
 
+    const defaultVideoAssets = process.env.ENABLE_WEBSITE_VIDEO === "true";
     const {
       name,
       message_template,
@@ -61,8 +62,8 @@ router.post("/", async (req, res, next) => {
       lead_ids = [],
       followUps = [],
       website_template_id = null,
-      auto_generate_assets = false,
-      require_video_assets = false,
+      auto_generate_assets = true,
+      require_video_assets = defaultVideoAssets,
       niche = null
     } = req.body;
 

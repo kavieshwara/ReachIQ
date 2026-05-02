@@ -11,8 +11,8 @@ function normalizeUrl(value?: string | null) {
   return trimmed.replace(/\/$/, "");
 }
 
-const preferredHostedAppUrl = "https://reachiq-zeta.vercel.app";
-const legacyHostedAppUrls = new Set([
+export const preferredHostedAppUrl = "https://reachiq-zeta.vercel.app";
+export const legacyHostedAppUrls = new Set([
   "https://reachiq-kavieshwaras-projects.vercel.app"
 ]);
 
@@ -26,6 +26,14 @@ function canonicalizeHostedAppUrl(value: string | null) {
   }
 
   return value;
+}
+
+function isReachiqHostedDomain(value: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  return /^https:\/\/reachiq(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(value);
 }
 
 export function resolveStaticAppUrl() {
@@ -54,7 +62,11 @@ export function resolveStaticAppUrl() {
 
 export function resolveBrowserAppUrl() {
   if (typeof window !== "undefined" && window.location?.origin) {
-    return normalizeUrl(window.location.origin) || resolveStaticAppUrl();
+    const browserOrigin = normalizeUrl(window.location.origin);
+    if (browserOrigin && (legacyHostedAppUrls.has(browserOrigin) || isReachiqHostedDomain(browserOrigin))) {
+      return preferredHostedAppUrl;
+    }
+    return browserOrigin || resolveStaticAppUrl();
   }
 
   return resolveStaticAppUrl();

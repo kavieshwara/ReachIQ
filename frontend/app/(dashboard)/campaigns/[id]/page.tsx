@@ -96,6 +96,9 @@ function getDraftAssetHint(kind: "website" | "message" | "video", preparation: a
 
 function getPreparationErrorDisplay(item: any, preparation: any) {
   if (item?.error_message) {
+    if (/request failed with status code 503/i.test(String(item.error_message))) {
+      return "A hosted ReachIQ service was temporarily unavailable while this lead was processing. Click Launch again to retry this lead on the live backend.";
+    }
     if (isReconnectableWhatsAppError(item.error_message)) {
       return "Reconnect WhatsApp in Connection Center, then click Launch again.";
     }
@@ -186,6 +189,9 @@ export default function CampaignDetailPage() {
     const preparation = preparationByLead.get(item.id);
     return isReconnectableWhatsAppError(item?.error_message) || isReconnectableWhatsAppError(preparation?.generation_error);
   });
+  const automationConfig = campaign.automation_config || {};
+  const assetsDisabledForCampaign = automationConfig.autoGenerateAssets === false;
+  const videoDisabledForCampaign = automationConfig.requireVideoAssets === false;
   const statusHelper =
     campaign.status === "draft"
       ? "This campaign is still a draft. Click Launch to start generating websites, preparing messages, and sending."
@@ -288,6 +294,21 @@ export default function CampaignDetailPage() {
                   Refresh status
                 </Button>
               </div>
+            </div>
+          ) : null}
+          {assetsDisabledForCampaign || videoDisabledForCampaign ? (
+            <div className="rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-textSecondary">
+              <p className="font-medium text-textPrimary">This campaign was created in a lighter asset mode.</p>
+              <p className="mt-1">
+                {assetsDisabledForCampaign
+                  ? "Website generation was turned off when this campaign was created, so those rows are intentionally being skipped."
+                  : "Website generation is active for this campaign."}
+              </p>
+              <p className="mt-1">
+                {videoDisabledForCampaign
+                  ? "Video capture was also turned off for this campaign, so ReachIQ will only prepare the message until you create a new campaign with video enabled."
+                  : "Video capture is active for this campaign."}
+              </p>
             </div>
           ) : null}
         </CardContent>
