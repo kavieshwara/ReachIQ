@@ -7,8 +7,6 @@ import { refreshCampaignMetrics } from "../services/campaignService.js";
 import { getCampaignAutomationConfig, removeCampaignAutomationConfig, setCampaignAutomationConfig } from "../services/campaignAutomationCompatService.js";
 import { createNotification } from "../services/notificationService.js";
 import { getCampaignPreparations } from "../services/outreachPreparationService.js";
-import { getActiveWhatsAppConnection } from "../services/whatsappConnectionService.js";
-import { restoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
 import { createDemoCampaign, getDemoCampaignById, getDemoCampaigns, isDemoMode, launchDemoCampaign, updateDemoCampaign } from "../utils/demo.js";
 
 const router = express.Router();
@@ -279,35 +277,6 @@ router.post("/:id/launch", async (req, res, next) => {
       return res.json({ success: true, campaign: launchDemoCampaign(req.params.id) });
     }
 
-    let activeConnection = await getActiveWhatsAppConnection(req.user.id);
-    if (!activeConnection || activeConnection.status !== "connected") {
-      const restoredQr = await restoreQRSessionIfAvailable(req.user.id).catch(() => null);
-      if (restoredQr?.status === "connected") {
-        activeConnection = {
-          provider_type: "qr",
-          status: "connected",
-          phone_number: restoredQr.phoneNumber,
-          session_data: {
-            socketUser: restoredQr.socketUser,
-            restoredFromDisk: true
-          }
-        };
-      }
-    }
-
-    if (!activeConnection || activeConnection.status !== "connected") {
-      await supabaseAdmin
-        .from("campaigns")
-        .update({ status: "awaiting_whatsapp", updated_at: nowIso() })
-        .eq("id", req.params.id)
-        .eq("user_id", req.user.id);
-
-      return res.status(409).json({
-        error: "Connect WhatsApp before launching this campaign.",
-        connectRequired: true
-      });
-    }
-
     await supabaseAdmin
       .from("campaign_leads")
       .update({
@@ -338,7 +307,7 @@ router.post("/:id/launch", async (req, res, next) => {
     await createNotification({
       userId: req.user.id,
       title: "Campaign launched",
-      body: `${data.name} is now running with ${data.total_leads} lead${data.total_leads === 1 ? "" : "s"} in queue.`,
+      body: `${data.name} is now preparing websites, messages, and sends for ${data.total_leads} lead${data.total_leads === 1 ? "" : "s"}.`,
       type: "success",
       metadata: { campaignId: data.id, href: `/campaigns/${data.id}` }
     });

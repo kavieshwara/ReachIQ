@@ -129,6 +129,47 @@ export async function processCampaignMessages({ campaignId, userId }) {
   const campaign = await getCampaignWithLeads(campaignId, userId);
   const automationConfig = await getCampaignAutomationConfig(campaignId);
   let awaitingReconnect = false;
+  const leads = (campaign.campaign_leads || []).filter((item) => item.status === "pending");
+  const preparedOutreachByLeadId = new Map();
+
+  for (const item of leads) {
+    try {
+      const outreach = await prepareCampaignLeadOutreach({
+        campaign,
+        campaignLead: item,
+        lead: item.leads
+      });
+
+      preparedOutreachByLeadId.set(item.id, outreach);
+      await refreshCampaignMetrics(campaignId);
+    } catch (error) {
+      withTimestampError(`Campaign preparation failed for ${item.id}`, error);
+      const surfacedMessage = String(error?.message || "ReachIQ could not prepare this lead right now.");
+
+      await supabaseAdmin
+        .from("campaign_leads")
+        .update({
+          status: "failed",
+          error_message: surfacedMessage
+        })
+        .eq("id", item.id);
+
+      await updatePreparationSendState({
+        campaignId,
+        campaignLeadId: item.id,
+        payload: {
+          user_id: userId,
+          campaign_id: campaignId,
+          campaign_lead_id: item.id,
+          lead_id: item.lead_id,
+          send_status: "failed",
+          generation_error: surfacedMessage
+        }
+      });
+
+      await refreshCampaignMetrics(campaignId);
+    }
+  }
 
   const activeConnection = await resolveCampaignConnection(userId);
   if (!activeConnection || activeConnection.status !== "connected") {
@@ -136,12 +177,15 @@ export async function processCampaignMessages({ campaignId, userId }) {
       .from("campaigns")
       .update({ status: "awaiting_whatsapp", updated_at: nowIso() })
       .eq("id", campaignId);
-    throw new Error("Connect WhatsApp before launching this campaign.");
+    return;
   }
 
-  const leads = (campaign.campaign_leads || []).filter((item) => item.status === "pending");
-
   for (const item of leads) {
+    const outreach = preparedOutreachByLeadId.get(item.id);
+    if (!outreach) {
+      continue;
+    }
+
     const allowance = await getLiveMessageAllowance(userId);
     if (allowance.used >= allowance.total) {
       await supabaseAdmin
@@ -178,12 +222,6 @@ export async function processCampaignMessages({ campaignId, userId }) {
     }
 
     try {
-      const outreach = await prepareCampaignLeadOutreach({
-        campaign,
-        campaignLead: item,
-        lead: item.leads
-      });
-
       const personalizedMessage = finalizeOutboundCaption(
         outreach.personalizedMessage || interpolateTemplate(campaign.message_template, item.leads)
       );

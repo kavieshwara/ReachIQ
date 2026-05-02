@@ -150,15 +150,20 @@ function injectPreviewBase(html, previewUrl) {
   return `${baseTag}${html}`;
 }
 
-async function openPreviewPage(page, previewUrl) {
+async function openPreviewPage(page, previewUrl, previewHtml = "") {
   page.setDefaultTimeout(30000);
 
-  const response = await fetch(previewUrl);
-  if (!response.ok) {
-    throw new Error(`ReachIQ could not load the generated website preview for video capture. ${response.status} ${response.statusText}`.trim());
+  let html = String(previewHtml || "").trim();
+
+  if (!html) {
+    const response = await fetch(previewUrl);
+    if (!response.ok) {
+      throw new Error(`ReachIQ could not load the generated website preview for video capture. ${response.status} ${response.statusText}`.trim());
+    }
+
+    html = await response.text();
   }
 
-  const html = await response.text();
   await page.setContent(injectPreviewBase(html, previewUrl), {
     waitUntil: "domcontentloaded",
     timeout: 25000
@@ -336,7 +341,7 @@ export function isWebsiteVideoEnabled() {
   return WEBSITE_VIDEO_ENABLED;
 }
 
-export async function captureGeneratedWebsiteVideo({ videoId, previewUrl }) {
+export async function captureGeneratedWebsiteVideo({ videoId, previewUrl, previewHtml = "" }) {
   if (!WEBSITE_VIDEO_ENABLED) {
     throw new Error("Website video capture is disabled in this environment.");
   }
@@ -384,7 +389,7 @@ export async function captureGeneratedWebsiteVideo({ videoId, previewUrl }) {
 
     const page = await context.newPage();
     const recordedVideo = page.video();
-    await openPreviewPage(page, previewUrl);
+    await openPreviewPage(page, previewUrl, previewHtml);
     await animatePreview(page);
 
     await page.close();

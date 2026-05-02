@@ -1,90 +1,131 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { nowIso } from "../utils/helpers.js";
+import { supabaseAdmin } from "../utils/supabase.js";
 
-const STORE_DIR = path.resolve(process.cwd(), ".runtime");
-const STORE_FILE = path.join(STORE_DIR, "campaign-automation-compat.json");
+const STORE_KEY_PREFIX = "campaign_automation_compat:";
 
-async function ensureStoreDir() {
-  await fs.mkdir(STORE_DIR, { recursive: true });
+function buildStoreKey(campaignId) {
+  return `${STORE_KEY_PREFIX}${campaignId}`;
 }
 
-async function readStore() {
-  try {
-    const raw = await fs.readFile(STORE_FILE, "utf8");
-    return JSON.parse(raw);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return { campaigns: {} };
+function buildDefaultCampaignConfig(campaignId) {
+  return {
+    campaignId,
+    websiteTemplateId: null,
+    autoGenerateAssets: false,
+    requireVideoAssets: false,
+    nicheHint: null,
+    leadPreparations: {}
+  };
+}
+
+function normalizeCampaignConfig(campaignId, config) {
+  const base = buildDefaultCampaignConfig(campaignId);
+  return {
+    ...base,
+    ...(config || {}),
+    campaignId,
+    leadPreparations: {
+      ...base.leadPreparations,
+      ...(config?.leadPreparations || {})
     }
+  };
+}
+
+async function readCampaignConfig(campaignId) {
+  const { data, error } = await supabaseAdmin
+    .from("admin_settings")
+    .select("value")
+    .eq("key", buildStoreKey(campaignId))
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.value) {
+    return null;
+  }
+
+  try {
+    return normalizeCampaignConfig(campaignId, JSON.parse(data.value));
+  } catch {
+    return null;
+  }
+}
+
+async function writeCampaignConfig(campaignId, config) {
+  const normalized = normalizeCampaignConfig(campaignId, config);
+  const { error } = await supabaseAdmin
+    .from("admin_settings")
+    .upsert(
+      {
+        key: buildStoreKey(campaignId),
+        value: JSON.stringify(normalized),
+        updated_at: nowIso()
+      },
+      { onConflict: "key" }
+    );
+
+  if (error) {
+    throw error;
+  }
+
+  return normalized;
+}
+
+export async function getCampaignAutomationConfig(campaignId) {
+  return readCampaignConfig(campaignId);
+}
+
+export async function setCampaignAutomationConfig(campaignId, config) {
+  const current = (await readCampaignConfig(campaignId)) || buildDefaultCampaignConfig(campaignId);
+  return writeCampaignConfig(campaignId, {
+    ...current,
+    ...config,
+    leadPreparations: {
+      ...current.leadPreparations,
+      ...(config?.leadPreparations || {})
+    }
+  });
+}
+
+export async function removeCampaignAutomationConfig(campaignId) {
+  const { error } = await supabaseAdmin
+    .from("admin_settings")
+    .delete()
+    .eq("key", buildStoreKey(campaignId));
+
+  if (error) {
     throw error;
   }
 }
 
-async function writeStore(store) {
-  await ensureStoreDir();
-  await fs.writeFile(STORE_FILE, JSON.stringify(store, null, 2), "utf8");
-}
-
-function ensureCampaign(store, campaignId) {
-  if (!store.campaigns[campaignId]) {
-    store.campaigns[campaignId] = {
-      campaignId,
-      websiteTemplateId: null,
-      autoGenerateAssets: false,
-      requireVideoAssets: false,
-      nicheHint: null,
-      leadPreparations: {}
-    };
-  }
-  return store.campaigns[campaignId];
-}
-
-export async function getCampaignAutomationConfig(campaignId) {
-  const store = await readStore();
-  return store.campaigns[campaignId] || null;
-}
-
-export async function setCampaignAutomationConfig(campaignId, config) {
-  const store = await readStore();
-  const current = ensureCampaign(store, campaignId);
-  store.campaigns[campaignId] = {
-    ...current,
-    ...config,
-    campaignId,
-    leadPreparations: {
-      ...current.leadPreparations,
-      ...(config.leadPreparations || {})
-    }
-  };
-  await writeStore(store);
-  return store.campaigns[campaignId];
-}
-
-export async function removeCampaignAutomationConfig(campaignId) {
-  const store = await readStore();
-  delete store.campaigns[campaignId];
-  await writeStore(store);
-}
-
 export async function getCompatLeadPreparation(campaignId, campaignLeadId) {
-  const config = await getCampaignAutomationConfig(campaignId);
+  const config = await readCampaignConfig(campaignId);
   return config?.leadPreparations?.[campaignLeadId] || null;
 }
 
 export async function upsertCompatLeadPreparation(campaignId, campaignLeadId, payload) {
-  const store = await readStore();
-  const current = ensureCampaign(store, campaignId);
+  const current = (await readCampaignConfig(campaignId)) || buildDefaultCampaignConfig(campaignId);
   const existing = current.leadPreparations[campaignLeadId] || {};
-  current.leadPreparations[campaignLeadId] = {
-    ...existing,
-    ...payload,
-    campaign_lead_id: campaignLeadId
+
+  const nextConfig = {
+    ...current,
+    leadPreparations: {
+      ...current.leadPreparations,
+      [campaignLeadId]: {
+        ...existing,
+        ...payload,
+        campaign_lead_id: campaignLeadId
+      }
+    }
   };
-  await writeStore(store);
-  return current.leadPreparations[campaignLeadId];
+
+  const saved = await writeCampaignConfig(campaignId, nextConfig);
+  return saved.leadPreparations[campaignLeadId];
 }
 
 export async function listCompatLeadPreparations(campaignId) {
-  const config = await getCampaignAutomationConfig(campaignId);
+  const config = await readCampaignConfig(campaignId);
   return Object.values(config?.leadPreparations || {});
 }

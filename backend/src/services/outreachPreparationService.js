@@ -1,5 +1,5 @@
 import { generatePersonalizedOutreachMessage } from "./geminiService.js";
-import { generateWebsite, resolveGeneratedWebsitePreviewUrl } from "./websiteService.js";
+import { generateWebsite, getGeneratedWebsitePreviewHtml, resolveGeneratedWebsitePreviewUrl } from "./websiteService.js";
 import { captureGeneratedWebsiteVideo, isWebsiteVideoEnabled, resolveGeneratedWebsiteVideoUrl } from "./videoCaptureService.js";
 import { interpolateTemplate, nowIso } from "../utils/helpers.js";
 import { supabaseAdmin } from "../utils/supabase.js";
@@ -451,7 +451,15 @@ async function ensureMessagePrepared({
   };
 }
 
-async function ensureVideoPrepared({ campaign, campaignLead, lead, preparation, websiteUrl, requiresVideoAssets }) {
+async function ensureVideoPrepared({
+  campaign,
+  campaignLead,
+  lead,
+  preparation,
+  websiteUrl,
+  generatedWebsiteId,
+  requiresVideoAssets
+}) {
   if (!requiresVideoAssets) {
     return upsertPreparation(campaign.id, campaignLead.id, {
       ...preparation,
@@ -512,9 +520,14 @@ async function ensureVideoPrepared({ campaign, campaignLead, lead, preparation, 
     video_status: "generating"
   });
 
+  const previewHtml = generatedWebsiteId
+    ? await getGeneratedWebsitePreviewHtml(generatedWebsiteId).catch(() => "")
+    : "";
+
   const captured = await captureGeneratedWebsiteVideo({
     videoId: campaignLead.id,
-    previewUrl: websiteUrl
+    previewUrl: websiteUrl,
+    previewHtml
   });
 
   return upsertPreparation(campaign.id, campaignLead.id, {
@@ -606,6 +619,7 @@ export async function prepareCampaignLeadOutreach({ campaign, campaignLead, lead
       lead,
       preparation,
       websiteUrl: websitePrepared.websiteUrl,
+      generatedWebsiteId: websitePrepared.generatedWebsiteId,
       requiresVideoAssets
     });
 
