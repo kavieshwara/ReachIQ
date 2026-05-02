@@ -7,6 +7,8 @@ import { buildBrowserAppUrl } from "@/lib/public-url";
 import { supabase } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
+const AUTH_REDIRECT_STORAGE_KEY = "reachiq_auth_redirect_to";
+
 function buildLoginRedirectUrl(message: string, nextPath?: string | null) {
   const redirectUrl = new URL("/login", buildBrowserAppUrl("/"));
   redirectUrl.searchParams.set("authError", message);
@@ -41,7 +43,43 @@ function AuthCallbackPageContent() {
 
   const nextPath = useMemo(() => {
     const next = searchParams?.get("next");
-    return next && next.startsWith("/") ? next : "/dashboard";
+    if (next && next.startsWith("/")) {
+      return next;
+    }
+
+    if (typeof window !== "undefined") {
+      const storedNext = window.sessionStorage.getItem(AUTH_REDIRECT_STORAGE_KEY);
+      if (storedNext && storedNext.startsWith("/")) {
+        return storedNext;
+      }
+    }
+
+    return "/dashboard";
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const clearStoredRedirect = () => {
+      window.sessionStorage.removeItem(AUTH_REDIRECT_STORAGE_KEY);
+    };
+
+    if (searchParams?.get("error")) {
+      clearStoredRedirect();
+      return;
+    }
+
+    const subscription = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        clearStoredRedirect();
+      }
+    });
+
+    return () => {
+      subscription.data.subscription.unsubscribe();
+    };
   }, [searchParams]);
 
   useEffect(() => {
@@ -70,6 +108,9 @@ function AuthCallbackPageContent() {
       }
 
       hasRedirectedRef.current = true;
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(AUTH_REDIRECT_STORAGE_KEY);
+      }
       await syncSession(session);
       navigate(nextPath, router);
       return true;

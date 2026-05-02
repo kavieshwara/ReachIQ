@@ -18,6 +18,8 @@ import { buildBrowserAppUrl, preferredHostedAppUrl, resolveBrowserAppUrl } from 
 import { isDemoMode, isSupabaseConfigured, supabase, supabaseConfigMessage } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
+const AUTH_REDIRECT_STORAGE_KEY = "reachiq_auth_redirect_to";
+
 const schema = z.object({
   email: z.string().email("Enter a valid email address"),
   password: z.string().min(6, "Password should be at least 6 characters")
@@ -100,10 +102,14 @@ function LoginPageContent() {
         return;
       }
 
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(AUTH_REDIRECT_STORAGE_KEY, destination);
+      }
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: buildBrowserAppUrl(`/auth/callback?next=${encodeURIComponent(destination)}`)
+          redirectTo: buildBrowserAppUrl("/auth/callback")
         }
       });
 
