@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { MessageCircleMore } from "lucide-react";
 import { supportFallbackNumber } from "@/components/pricing/pricing-data";
+import { buildApiUrl } from "@/lib/api-base-url";
 
 export function PublicWhatsAppButton() {
   const [phoneNumber, setPhoneNumber] = useState(supportFallbackNumber);
@@ -12,7 +13,7 @@ export function PublicWhatsAppButton() {
   const shouldRender = pathname === "/" || pathname === "/pricing";
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/platform/settings`)
+    fetch(buildApiUrl("/api/platform/settings"))
       .then((response) => response.json())
       .then((data) => {
         if (!Array.isArray(data)) return;

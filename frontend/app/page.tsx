@@ -15,6 +15,7 @@ import { LogoIcon } from "@/components/brand/Logo";
 import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { buildApiUrl } from "@/lib/api-base-url";
 import { DisclaimerBanner } from "@/components/shared/DisclaimerBanner";
 import { FullDisclaimer } from "@/components/shared/FullDisclaimer";
 import { PricingSection } from "@/components/pricing/PricingSection";
@@ -40,7 +41,7 @@ export default function LandingPage() {
   const [settings, setSettings] = useState<any[]>([]);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/platform/settings`)
+    fetch(buildApiUrl("/api/platform/settings"))
       .then((response) => response.json())
       .then((data) => setSettings(Array.isArray(data) ? data : []))
       .catch(() => setSettings([]));

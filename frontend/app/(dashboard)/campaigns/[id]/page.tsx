@@ -7,6 +7,7 @@ import { CampaignStats } from "@/components/campaigns/CampaignStats";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { buildApiUrl } from "@/lib/api-base-url";
 import { formatDate } from "@/lib/utils";
 import { api } from "@/lib/api";
 
@@ -19,7 +20,7 @@ function resolvePreviewUrl(preparation: any) {
     return "";
   }
 
-  return `${process.env.NEXT_PUBLIC_API_URL}/preview/${preparation.generated_website_id}`;
+  return buildApiUrl(`/preview/${preparation.generated_website_id}`);
 }
 
 function formatPreparationStatus(kind: "website" | "message" | "video", value?: string | null) {

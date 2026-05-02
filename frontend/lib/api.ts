@@ -1,6 +1,7 @@
 "use client";
 
 import axios from "axios";
+import { resolveApiBaseUrl } from "@/lib/api-base-url";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 type UsageLimitEventDetail = {
@@ -10,7 +11,7 @@ type UsageLimitEventDetail = {
 };
 
 export const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: resolveApiBaseUrl(),
   timeout: 70000,
   headers: {
     "Content-Type": "application/json"

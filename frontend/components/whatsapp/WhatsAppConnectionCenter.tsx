@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { api } from "@/lib/api";
+import { buildApiUrl } from "@/lib/api-base-url";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 
 type ProviderType = "qr" | "meta" | "none";
@@ -146,7 +147,7 @@ export function WhatsAppConnectionCenter() {
       throw new Error("Your session token is missing. Please sign in again.");
     }
 
-    const source = new EventSource(`${process.env.NEXT_PUBLIC_API_URL}/api/whatsapp/qr-stream?token=${encodeURIComponent(session.access_token)}`);
+    const source = new EventSource(buildApiUrl(`/api/whatsapp/qr-stream?token=${encodeURIComponent(session.access_token)}`));
     streamRef.current = source;
 
     source.addEventListener("snapshot", (event) => {
