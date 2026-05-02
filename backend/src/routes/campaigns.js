@@ -8,7 +8,7 @@ import { getCampaignAutomationConfig, removeCampaignAutomationConfig, setCampaig
 import { createNotification } from "../services/notificationService.js";
 import { getCampaignPreparations } from "../services/outreachPreparationService.js";
 import { getActiveWhatsAppConnection } from "../services/whatsappConnectionService.js";
-import { getStoredLinkedQrSessionInfo } from "../services/whatsappQRService.js";
+import { restoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
 import { createDemoCampaign, getDemoCampaignById, getDemoCampaigns, isDemoMode, launchDemoCampaign, updateDemoCampaign } from "../utils/demo.js";
 
 const router = express.Router();
@@ -280,14 +280,14 @@ router.post("/:id/launch", async (req, res, next) => {
 
     let activeConnection = await getActiveWhatsAppConnection(req.user.id);
     if (!activeConnection || activeConnection.status !== "connected") {
-      const storedQr = await getStoredLinkedQrSessionInfo(req.user.id);
-      if (storedQr) {
+      const restoredQr = await restoreQRSessionIfAvailable(req.user.id).catch(() => null);
+      if (restoredQr?.status === "connected") {
         activeConnection = {
           provider_type: "qr",
           status: "connected",
-          phone_number: storedQr.phoneNumber,
+          phone_number: restoredQr.phoneNumber,
           session_data: {
-            socketUser: storedQr.socketUser,
+            socketUser: restoredQr.socketUser,
             restoredFromDisk: true
           }
         };

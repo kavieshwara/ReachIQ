@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { CampaignStats } from "@/components/campaigns/CampaignStats";
@@ -95,6 +96,9 @@ function getDraftAssetHint(kind: "website" | "message" | "video", preparation: a
 
 function getPreparationErrorDisplay(item: any, preparation: any) {
   if (item?.error_message) {
+    if (isReconnectableWhatsAppError(item.error_message)) {
+      return "Reconnect WhatsApp in Connection Center, then click Launch again.";
+    }
     return item.error_message;
   }
 
@@ -113,7 +117,21 @@ function getPreparationErrorDisplay(item: any, preparation: any) {
     return "Preview repaired. Click Launch again to retry video capture on the live hosted site.";
   }
 
+  if (isReconnectableWhatsAppError(generationError)) {
+    return "Reconnect WhatsApp in Connection Center, then click Launch again.";
+  }
+
   return generationError;
+}
+
+function isReconnectableWhatsAppError(message: string | null | undefined) {
+  const text = String(message || "").trim();
+  return (
+    /qr whatsapp session is not connected\./i.test(text) ||
+    /no active whatsapp connection found\./i.test(text) ||
+    /could not restore the whatsapp qr session in time/i.test(text) ||
+    /reconnect whatsapp in connection center/i.test(text)
+  );
 }
 
 export default function CampaignDetailPage() {
@@ -164,6 +182,10 @@ export default function CampaignDetailPage() {
   const preparationByLead = new Map<string, any>(
     (campaign.outreach_preparations || []).map((item: any) => [item.campaign_lead_id, item])
   );
+  const hasReconnectableWhatsAppError = (campaign.campaign_leads || []).some((item: any) => {
+    const preparation = preparationByLead.get(item.id);
+    return isReconnectableWhatsAppError(item?.error_message) || isReconnectableWhatsAppError(preparation?.generation_error);
+  });
   const statusHelper =
     campaign.status === "draft"
       ? "This campaign is still a draft. Click Launch to start generating websites, preparing messages, and sending."
@@ -246,10 +268,26 @@ export default function CampaignDetailPage() {
             <p className="text-xs text-textMuted">{refreshing ? "Refreshing..." : "Auto-refresh every 5s while active"}</p>
           </div>
           <p className="text-sm leading-6 text-textSecondary">{statusHelper}</p>
-          {campaign.status === "awaiting_whatsapp" ? (
+          {campaign.status === "awaiting_whatsapp" || hasReconnectableWhatsAppError ? (
             <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-              ReachIQ has this campaign paused until WhatsApp is connected again. If your phone still shows the linked device,
-              the local backend session was likely lost and needs a fresh reconnect before you click Launch again.
+              <p>
+                ReachIQ has this campaign paused until WhatsApp is connected again. If your phone still shows the linked device,
+                the hosted QR session was likely dropped during a backend restart and needs a fresh reconnect before you click Launch again.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Link href="/dashboard/connect">
+                  <Button size="sm">Reconnect WhatsApp</Button>
+                </Link>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    load().catch(() => null);
+                  }}
+                >
+                  Refresh status
+                </Button>
+              </div>
             </div>
           ) : null}
         </CardContent>

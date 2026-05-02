@@ -3,7 +3,7 @@ import { interpolateTemplate, nowIso, sleep, withTimestampError } from "../utils
 import { prepareCampaignLeadOutreach } from "./outreachPreparationService.js";
 import { getCampaignAutomationConfig, upsertCompatLeadPreparation } from "./campaignAutomationCompatService.js";
 import { getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
-import { getStoredLinkedQrSessionInfo } from "./whatsappQRService.js";
+import { restoreQRSessionIfAvailable } from "./whatsappQRService.js";
 import { sendUserTextMessage, sendUserVideoMessage } from "./whatsappService.js";
 import { ensureDailyUsageWindow } from "../utils/dailyUsage.js";
 
@@ -43,6 +43,15 @@ function finalizeOutboundCaption(value) {
     .replace(/sample website\s*:?\s*/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function isReconnectableWhatsAppError(error) {
+  const message = String(error?.message || "");
+  return (
+    message.includes("QR WhatsApp session is not connected.") ||
+    message.includes("No active WhatsApp connection found.") ||
+    message.includes("ReachIQ could not restore the WhatsApp QR session in time.")
+  );
 }
 
 export async function incrementMessageCount(userId) {
@@ -100,14 +109,14 @@ async function resolveCampaignConnection(userId) {
     return activeConnection;
   }
 
-  const storedQr = await getStoredLinkedQrSessionInfo(userId);
-  if (storedQr) {
+  const restoredQr = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  if (restoredQr?.status === "connected") {
     return {
       provider_type: "qr",
       status: "connected",
-      phone_number: storedQr.phoneNumber,
+      phone_number: restoredQr.phoneNumber,
       session_data: {
-        socketUser: storedQr.socketUser,
+        socketUser: restoredQr.socketUser,
         restoredFromDisk: true
       }
     };
@@ -119,6 +128,7 @@ async function resolveCampaignConnection(userId) {
 export async function processCampaignMessages({ campaignId, userId }) {
   const campaign = await getCampaignWithLeads(campaignId, userId);
   const automationConfig = await getCampaignAutomationConfig(campaignId);
+  let awaitingReconnect = false;
 
   const activeConnection = await resolveCampaignConnection(userId);
   if (!activeConnection || activeConnection.status !== "connected") {
@@ -224,11 +234,16 @@ export async function processCampaignMessages({ campaignId, userId }) {
       await sleep(Number(campaign.delay_seconds || 5) * 1000);
     } catch (error) {
       withTimestampError(`Campaign send failed for ${item.id}`, error);
+      const reconnectableWhatsAppError = isReconnectableWhatsAppError(error);
+      const surfacedMessage = reconnectableWhatsAppError
+        ? "Reconnect WhatsApp in Connection Center, then click Launch again."
+        : error.message;
+
       await supabaseAdmin
         .from("campaign_leads")
         .update({
           status: "failed",
-          error_message: error.message
+          error_message: surfacedMessage
         })
         .eq("id", item.id);
 
@@ -241,11 +256,26 @@ export async function processCampaignMessages({ campaignId, userId }) {
           campaign_lead_id: item.id,
           lead_id: item.lead_id,
           send_status: "failed",
-          generation_error: error.message
+          generation_error: surfacedMessage
         }
       });
+
+      if (reconnectableWhatsAppError) {
+        awaitingReconnect = true;
+        await supabaseAdmin
+          .from("campaigns")
+          .update({ status: "awaiting_whatsapp", updated_at: nowIso() })
+          .eq("id", campaignId);
+        await refreshCampaignMetrics(campaignId);
+        break;
+      }
+
       await refreshCampaignMetrics(campaignId);
     }
+  }
+
+  if (awaitingReconnect) {
+    return;
   }
 
   await supabaseAdmin

@@ -53,38 +53,44 @@ function hasRecoverableQrConnection(connections = []) {
   );
 }
 
-async function buildStoredQrConnectedStatus(userId, connections = []) {
+async function buildStoredQrRecoveredStatus(userId, connections = []) {
   const stored = await getStoredLinkedQrSessionInfo(userId);
   if (!stored) {
     return null;
   }
 
   try {
-    await saveWhatsAppConnection({
-      userId,
-      providerType: "qr",
-      status: "connected",
-      phoneNumber: stored.phoneNumber,
-      sessionData: {
-        socketUser: stored.socketUser,
-        restoredFromDisk: true
-      },
-      lastActiveAt: new Date().toISOString()
-    });
+    const snapshot = await restoreQRSessionIfAvailable(userId);
+    if (snapshot?.status === "connected" || snapshot?.status === "connecting" || snapshot?.status === "waiting_for_scan") {
+      return {
+        ...buildQrStatusFromSnapshot(snapshot),
+        metaVerified: false,
+        connections: connections.map(serializeConnectionForClient)
+      };
+    }
   } catch (error) {
-    console.warn(`[ReachIQ][qr] could not persist restored QR connection for ${userId}: ${error.message}`);
+    console.warn(`[ReachIQ][qr] could not restore QR connection for ${userId}: ${error.message}`);
+  }
+
+  return null;
+}
+
+async function buildStaleQrDisconnectedStatus(userId, connection, connections = []) {
+  if (connection?.provider_type === "qr" && hasRecoverableQrConnection(connections)) {
+    try {
+      await disconnectWhatsAppProvider(userId, "qr");
+    } catch (error) {
+      console.warn(`[ReachIQ][qr] could not mark stale QR connection disconnected for ${userId}: ${error.message}`);
+    }
   }
 
   return {
-    connected: true,
+    connected: false,
     providerType: "qr",
-    status: "connected",
-    phoneNumber: stored.phoneNumber,
-    lastActiveAt: new Date().toISOString(),
-    sessionData: {
-      socketUser: stored.socketUser,
-      restoredFromDisk: true
-    },
+    status: "disconnected",
+    phoneNumber: connection?.phone_number || null,
+    lastActiveAt: connection?.last_active_at || null,
+    sessionData: {},
     qrImage: null,
     expiresAt: null,
     metaVerified: false,
@@ -265,9 +271,13 @@ router.get("/status", async (req, res, next) => {
       });
     }
 
-    const storedQr = await buildStoredQrConnectedStatus(req.user.id, allConnections);
+    const storedQr = await buildStoredQrRecoveredStatus(req.user.id, allConnections);
     if (storedQr) {
       return res.json(storedQr);
+    }
+
+    if (activeConnection?.provider_type === "qr") {
+      return res.json(await buildStaleQrDisconnectedStatus(req.user.id, activeConnection, allConnections));
     }
 
     const serialized = serializeConnectionForClient(activeConnection);
@@ -386,21 +396,13 @@ router.get("/qr/status", async (req, res, next) => {
       return res.json(buildQrStatusFromSnapshot(snapshot));
     }
 
-    const stored = await getStoredLinkedQrSessionInfo(req.user.id);
-    if (stored) {
-      return res.json({
-        providerType: "qr",
-        status: "connected",
-        connected: true,
-        phoneNumber: stored.phoneNumber,
-        qrImage: null,
-        expiresAt: null,
-        lastActiveAt: new Date().toISOString(),
-        sessionData: {
-          socketUser: stored.socketUser,
-          restoredFromDisk: true
-        }
-      });
+    const restored = await buildStoredQrRecoveredStatus(req.user.id, allConnections);
+    if (restored) {
+      return res.json(restored);
+    }
+
+    if (connection?.provider_type === "qr") {
+      return res.json(await buildStaleQrDisconnectedStatus(req.user.id, connection, allConnections));
     }
 
     res.json({

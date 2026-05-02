@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
 
+const primaryHostedHost = "reachiq-zeta.vercel.app";
+const legacyHostedHosts = new Set(["reachiq-kavieshwaras-projects.vercel.app"]);
+
 const protectedPrefixes = [
   "/dashboard",
   "/admin",
@@ -22,6 +25,13 @@ function isProtectedPath(pathname: string) {
 }
 
 export async function middleware(req: NextRequest) {
+  if (legacyHostedHosts.has(req.nextUrl.hostname)) {
+    const redirectUrl = req.nextUrl.clone();
+    redirectUrl.protocol = "https:";
+    redirectUrl.host = primaryHostedHost;
+    return NextResponse.redirect(redirectUrl, 308);
+  }
+
   const res = NextResponse.next();
   const pathname = req.nextUrl.pathname;
   const isLocalDev =
@@ -60,18 +70,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/dashboard/:path*",
-    "/admin/:path*",
-    "/leads/:path*",
-    "/campaigns/:path*",
-    "/templates/:path*",
-    "/websites/:path*",
-    "/follow-ups/:path*",
-    "/dashboard/connect/:path*",
-    "/connect-whatsapp/:path*",
-    "/referral/:path*",
-    "/settings/:path*",
-    "/support/:path*",
-    "/chat/:path*"
+    "/((?!_next/static|_next/image|favicon.ico|site.webmanifest|logo/).*)"
   ]
 };
