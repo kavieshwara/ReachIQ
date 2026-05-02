@@ -129,3 +129,33 @@ export async function listCompatLeadPreparations(campaignId) {
   const config = await readCampaignConfig(campaignId);
   return Object.values(config?.leadPreparations || {});
 }
+
+export async function findCompatLeadPreparationByCampaignLeadId(campaignLeadId) {
+  const { data, error } = await supabaseAdmin
+    .from("admin_settings")
+    .select("key, value")
+    .like("key", `${STORE_KEY_PREFIX}%`);
+
+  if (error) {
+    throw error;
+  }
+
+  for (const row of data || []) {
+    if (!row?.value) {
+      continue;
+    }
+
+    try {
+      const campaignId = String(row.key || "").replace(STORE_KEY_PREFIX, "");
+      const config = normalizeCampaignConfig(campaignId, JSON.parse(row.value));
+      const preparation = config?.leadPreparations?.[campaignLeadId];
+      if (preparation) {
+        return preparation;
+      }
+    } catch {
+      // Ignore malformed compatibility payloads.
+    }
+  }
+
+  return null;
+}

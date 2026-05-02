@@ -66,6 +66,36 @@ function formatPreparationStatus(kind: "website" | "message" | "video", value?: 
   return value;
 }
 
+function getLeadStatusDisplay(item: any, preparation: any) {
+  const currentStatus = String(item?.status || "pending").trim() || "pending";
+  const sendStatus = String(preparation?.send_status || "").trim();
+  const generationError = String(preparation?.generation_error || "").trim();
+
+  if (isReconnectableWhatsAppError(item?.error_message) || isReconnectableWhatsAppError(generationError)) {
+    return "awaiting_whatsapp";
+  }
+
+  const staleHostedFailure =
+    /request failed with status code 503/i.test(String(item?.error_message || "")) ||
+    /could not load the generated website preview/i.test(generationError) ||
+    /reachiq-hqzc\.onrender\.com/i.test(generationError) ||
+    /localhost:4001/i.test(generationError);
+
+  if (staleHostedFailure && sendStatus === "ready") {
+    return "ready";
+  }
+
+  if (currentStatus === "failed" && sendStatus === "ready" && !item?.sent_at) {
+    return "ready";
+  }
+
+  if (currentStatus === "failed" && sendStatus === "pending" && !item?.sent_at) {
+    return "pending";
+  }
+
+  return currentStatus;
+}
+
 function getDraftAssetHint(kind: "website" | "message" | "video", preparation: any) {
   if (kind === "website") {
     if (resolvePreviewUrl(preparation)) {
@@ -373,7 +403,7 @@ export default function CampaignDetailPage() {
                   return (
                     <tr key={item.id} className="border-b border-border/60">
                       <td className="px-3 py-2 text-textPrimary">{item.leads?.business_name}</td>
-                      <td className="px-3 py-2 text-textSecondary">{item.status}</td>
+                      <td className="px-3 py-2 text-textSecondary">{getLeadStatusDisplay(item, preparation)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatPreparationStatus("website", preparation?.website_status)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatPreparationStatus("message", preparation?.message_status)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatPreparationStatus("video", preparation?.video_status)}</td>

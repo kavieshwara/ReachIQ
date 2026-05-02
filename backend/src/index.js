@@ -19,7 +19,7 @@ import platformRoutes from "./routes/platform.js";
 import searchRoutes from "./routes/search.js";
 import notificationRoutes from "./routes/notifications.js";
 import internalRoutes from "./routes/internal.js";
-import { getGeneratedWebsiteVideoFilePath } from "./services/videoCaptureService.js";
+import { ensureGeneratedWebsiteVideoAvailable } from "./services/videoCaptureService.js";
 import { getGeneratedWebsitePreviewHtml } from "./services/websiteService.js";
 import { supabaseAdmin } from "./utils/supabase.js";
 
@@ -130,7 +130,7 @@ app.get("/preview/:id", async (req, res) => {
 
 app.get("/preview-video/:id", async (req, res) => {
   try {
-    const filePath = getGeneratedWebsiteVideoFilePath(req.params.id);
+    const { videoPath: filePath } = await ensureGeneratedWebsiteVideoAvailable(req.params.id);
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "video/mp4");
     return res.sendFile(filePath, (error) => {

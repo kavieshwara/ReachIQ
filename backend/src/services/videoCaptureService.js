@@ -5,7 +5,13 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { pathToFileURL } from "node:url";
 import ffmpegStatic from "ffmpeg-static";
-import { buildPreviewBaseUrl } from "./websiteService.js";
+import { supabaseAdmin } from "../utils/supabase.js";
+import { findCompatLeadPreparationByCampaignLeadId } from "./campaignAutomationCompatService.js";
+import {
+  buildPreviewBaseUrl,
+  getGeneratedWebsitePreviewHtml,
+  resolveGeneratedWebsitePreviewUrl
+} from "./websiteService.js";
 
 const VIDEO_ROOT = path.resolve(process.cwd(), process.env.WEBSITE_VIDEO_DIR || ".runtime/generated-videos");
 const RUNTIME_BIN_ROOT = path.resolve(process.cwd(), ".runtime/bin");
@@ -17,6 +23,8 @@ const BUNDLED_PLAYWRIGHT_INDEX = process.env.PLAYWRIGHT_PACKAGE_PATH
 const CAPTURE_WIDTH = 1280;
 const CAPTURE_HEIGHT = 720;
 const WEBSITE_VIDEO_ENABLED = String(process.env.ENABLE_WEBSITE_VIDEO || "true").toLowerCase() !== "false";
+const VIDEO_STORAGE_BUCKET = process.env.WEBSITE_VIDEO_BUCKET || "platform-assets";
+const VIDEO_STORAGE_PREFIX = (process.env.WEBSITE_VIDEO_STORAGE_PREFIX || "generated-videos").replace(/^\/+|\/+$/g, "");
 const CHROME_CANDIDATES = [
   process.env.PLAYWRIGHT_CHROME_EXECUTABLE_PATH,
 ].filter(Boolean);
@@ -341,6 +349,112 @@ export function isWebsiteVideoEnabled() {
   return WEBSITE_VIDEO_ENABLED;
 }
 
+function getStorageObjectPath(videoId) {
+  return `${VIDEO_STORAGE_PREFIX}/${videoId}.mp4`;
+}
+
+async function uploadVideoToStorage(videoId, filePath) {
+  const fileBuffer = await fs.readFile(filePath);
+  const objectPath = getStorageObjectPath(videoId);
+  const { error } = await supabaseAdmin.storage
+    .from(VIDEO_STORAGE_BUCKET)
+    .upload(objectPath, fileBuffer, {
+      contentType: "video/mp4",
+      upsert: true
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  return objectPath;
+}
+
+async function restoreVideoFromStorage(videoId, targetPath) {
+  const objectPath = getStorageObjectPath(videoId);
+  const { data, error } = await supabaseAdmin.storage
+    .from(VIDEO_STORAGE_BUCKET)
+    .download(objectPath);
+
+  if (error || !data) {
+    return false;
+  }
+
+  const bytes = Buffer.from(await data.arrayBuffer());
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.writeFile(targetPath, bytes);
+  return true;
+}
+
+async function findPreparationByVideoId(videoId) {
+  const { data, error } = await supabaseAdmin
+    .from("outreach_preparations")
+    .select("*")
+    .eq("campaign_lead_id", videoId)
+    .maybeSingle();
+
+  if (!error && data) {
+    return data;
+  }
+
+  if (error) {
+    const message = String(error.message || "");
+    const isMissingTable =
+      message.includes("public.outreach_preparations") ||
+      message.includes("relation \"public.outreach_preparations\" does not exist");
+
+    if (!isMissingTable) {
+      throw error;
+    }
+  }
+
+  return findCompatLeadPreparationByCampaignLeadId(videoId);
+}
+
+export async function ensureGeneratedWebsiteVideoAvailable(videoId) {
+  await ensureVideoRoot();
+  const finalVideoPath = getGeneratedWebsiteVideoFilePath(videoId);
+
+  if (await fileExists(finalVideoPath)) {
+    return {
+      videoPath: finalVideoPath,
+      videoUrl: buildGeneratedWebsiteVideoUrl(videoId)
+    };
+  }
+
+  const restored = await restoreVideoFromStorage(videoId, finalVideoPath).catch(() => false);
+  if (restored && (await fileExists(finalVideoPath))) {
+    return {
+      videoPath: finalVideoPath,
+      videoUrl: buildGeneratedWebsiteVideoUrl(videoId)
+    };
+  }
+
+  const preparation = await findPreparationByVideoId(videoId);
+  if (!preparation) {
+    throw new Error("ReachIQ could not find the video preparation for this lead.");
+  }
+
+  const previewUrl = resolveGeneratedWebsitePreviewUrl({
+    websiteId: preparation.generated_website_id,
+    liveUrl: preparation.website_live_url
+  });
+
+  if (!previewUrl) {
+    throw new Error("ReachIQ needs a generated website preview before it can rebuild the video.");
+  }
+
+  const previewHtml = preparation.generated_website_id
+    ? await getGeneratedWebsitePreviewHtml(preparation.generated_website_id).catch(() => "")
+    : "";
+
+  return captureGeneratedWebsiteVideo({
+    videoId,
+    previewUrl,
+    previewHtml
+  });
+}
+
 export async function captureGeneratedWebsiteVideo({ videoId, previewUrl, previewHtml = "" }) {
   if (!WEBSITE_VIDEO_ENABLED) {
     throw new Error("Website video capture is disabled in this environment.");
@@ -405,6 +519,9 @@ export async function captureGeneratedWebsiteVideo({ videoId, previewUrl, previe
 
   await convertWebmToMp4(webmPath, finalVideoPath);
   await fs.rm(tempVideoDir, { recursive: true, force: true }).catch(() => null);
+  await uploadVideoToStorage(videoId, finalVideoPath).catch((error) => {
+    console.error("[ReachIQ][video] Failed to upload generated video to storage", error);
+  });
 
   return {
     videoPath: finalVideoPath,
