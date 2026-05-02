@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BarChart3,
+  BookOpenText,
   Bot,
   CreditCard,
   Globe2,
@@ -20,6 +21,7 @@ import {
   WalletCards,
   X
 } from "lucide-react";
+import { DOCS_URL } from "@/lib/docs";
 import { cn } from "@/lib/utils";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -38,11 +40,16 @@ const secondaryItems = [
   { href: "/referral", label: "Referral", icon: Bot },
   { href: "/chat", label: "AI Chat", icon: BarChart3 },
   { href: "/pricing", label: "Pricing", icon: CreditCard },
+  { href: DOCS_URL, label: "Docs", icon: BookOpenText, external: true },
   { href: "/support", label: "Support", icon: LifeBuoy },
   { href: "/settings", label: "Settings", icon: Settings }
 ];
 
 function isRouteActive(pathname: string, href: string) {
+  if (/^https?:\/\//i.test(href)) {
+    return false;
+  }
+
   return pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
 }
 
@@ -118,19 +125,38 @@ export function MobileNav() {
             {moreItems.map((item) => {
               const Icon = item.icon;
               const active = isRouteActive(pathname, item.href);
+              const itemClass = cn(
+                "flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-sm font-medium transition",
+                active
+                  ? "border-primary/20 bg-primary/12 text-textPrimary shadow-[0_8px_30px_rgba(108,99,255,0.12)]"
+                  : "border-transparent bg-white/[0.03] text-textSecondary hover:border-white/8 hover:bg-white/[0.05] hover:text-textPrimary"
+              );
+              const iconClass = cn("flex h-10 w-10 items-center justify-center rounded-xl", active ? "bg-primary/18 text-primary" : "bg-white/[0.04] text-textSecondary");
+
+              if (item.external) {
+                return (
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={itemClass}
+                  >
+                    <span className={iconClass}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span>{item.label}</span>
+                  </a>
+                );
+              }
 
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={cn(
-                    "flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-sm font-medium transition",
-                    active
-                      ? "border-primary/20 bg-primary/12 text-textPrimary shadow-[0_8px_30px_rgba(108,99,255,0.12)]"
-                      : "border-transparent bg-white/[0.03] text-textSecondary hover:border-white/8 hover:bg-white/[0.05] hover:text-textPrimary"
-                  )}
+                  className={itemClass}
                 >
-                  <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl", active ? "bg-primary/18 text-primary" : "bg-white/[0.04] text-textSecondary")}>
+                  <span className={iconClass}>
                     <Icon className="h-4 w-4" />
                   </span>
                   <span>{item.label}</span>

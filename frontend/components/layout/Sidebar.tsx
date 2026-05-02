@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bot, ChevronLeft, ChevronRight, CreditCard, Globe2, LayoutDashboard, LifeBuoy, Megaphone, MessageSquare, Search, Settings, Sparkles, Users, WalletCards } from "lucide-react";
+import { BarChart3, BookOpenText, Bot, ChevronLeft, ChevronRight, CreditCard, Globe2, LayoutDashboard, LifeBuoy, Megaphone, MessageSquare, Search, Settings, Sparkles, Users, WalletCards } from "lucide-react";
 import { Logo, LogoIcon } from "@/components/brand/Logo";
 import { PaymentModal } from "@/components/payment/PaymentModal";
 import { Button } from "@/components/ui/button";
+import { DOCS_URL } from "@/lib/docs";
 import { getRecommendedCheckoutPlan, type CheckoutPlan } from "@/lib/payment-plans";
 import { cn } from "@/lib/utils";
 import { useUserStore } from "@/store/useUserStore";
@@ -23,6 +24,7 @@ const items = [
   { href: "/referral", label: "Referral", icon: Bot },
   { href: "/chat", label: "AI Chat", icon: BarChart3 },
   { href: "/pricing", label: "Pricing", icon: CreditCard },
+  { href: DOCS_URL, label: "Docs", icon: BookOpenText, external: true },
   { href: "/support", label: "Support", icon: LifeBuoy },
   { href: "/settings", label: "Settings", icon: Settings }
 ];
@@ -62,20 +64,41 @@ export function Sidebar() {
       <nav className="space-y-2">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href;
+          const active = !item.external && pathname === item.href;
+          const itemClass = cn(
+            "flex items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition",
+            active
+              ? "border border-primary/20 bg-primary/12 text-textPrimary shadow-[0_8px_30px_rgba(108,99,255,0.12)]"
+              : "border border-transparent text-textSecondary hover:border-white/8 hover:bg-white/[0.04] hover:text-textPrimary"
+          );
+          const iconClass = cn("flex h-9 w-9 items-center justify-center rounded-xl", active ? "bg-primary/18 text-primary" : "bg-white/[0.04] text-textSecondary");
+
+          if (item.external) {
+            return (
+              <a
+                key={item.href}
+                href={item.href}
+                target="_blank"
+                rel="noreferrer"
+                className={itemClass}
+                title={collapsed ? item.label : undefined}
+              >
+                <span className={iconClass}>
+                  <Icon className="h-4 w-4" />
+                </span>
+                {!collapsed ? item.label : null}
+              </a>
+            );
+          }
+
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition",
-                active
-                  ? "border border-primary/20 bg-primary/12 text-textPrimary shadow-[0_8px_30px_rgba(108,99,255,0.12)]"
-                  : "border border-transparent text-textSecondary hover:border-white/8 hover:bg-white/[0.04] hover:text-textPrimary"
-              )}
+              className={itemClass}
               title={collapsed ? item.label : undefined}
             >
-              <span className={cn("flex h-9 w-9 items-center justify-center rounded-xl", active ? "bg-primary/18 text-primary" : "bg-white/[0.04] text-textSecondary")}>
+              <span className={iconClass}>
                 <Icon className="h-4 w-4" />
               </span>
               {!collapsed ? item.label : null}

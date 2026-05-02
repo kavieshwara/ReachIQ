@@ -5,12 +5,14 @@ import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
+import { DOCS_URL } from "@/lib/docs";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
   { href: "#features", label: "Features" },
   { href: "#how-it-works", label: "How it Works" },
   { href: "/pricing", label: "Pricing" },
+  { href: DOCS_URL, label: "Docs", external: true },
   { href: "/login", label: "Login" }
 ];
 
@@ -36,7 +38,11 @@ export function Navbar() {
         <Logo variant="full" size="md" theme="dark" href="/" />
         <div className="hidden items-center gap-8 md:flex">
           {navLinks.map((item) =>
-            item.href.startsWith("#") ? (
+            item.external ? (
+              <a key={item.href} href={item.href} target="_blank" rel="noreferrer" className="text-sm text-textSecondary transition hover:text-textPrimary">
+                {item.label}
+              </a>
+            ) : item.href.startsWith("#") ? (
               <a key={item.href} href={item.href} className="text-sm text-textSecondary transition hover:text-textPrimary">
                 {item.label}
               </a>
@@ -63,7 +69,11 @@ export function Navbar() {
         <div className="border-t border-white/8 bg-surface/96 px-5 pb-5 pt-3 backdrop-blur-xl md:hidden">
           <div className="flex flex-col gap-3">
             {navLinks.map((item) =>
-              item.href.startsWith("#") ? (
+              item.external ? (
+                <a key={item.href} href={item.href} target="_blank" rel="noreferrer" className="rounded-2xl px-3 py-2 text-sm text-textSecondary hover:bg-white/[0.04] hover:text-textPrimary" onClick={() => setMobileOpen(false)}>
+                  {item.label}
+                </a>
+              ) : item.href.startsWith("#") ? (
                 <a key={item.href} href={item.href} className="rounded-2xl px-3 py-2 text-sm text-textSecondary hover:bg-white/[0.04] hover:text-textPrimary" onClick={() => setMobileOpen(false)}>
                   {item.label}
                 </a>
@@ -82,4 +92,3 @@ export function Navbar() {
     </nav>
   );
 }
-
