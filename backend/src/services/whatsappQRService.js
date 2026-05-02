@@ -4,7 +4,14 @@ import boomModule from "../../node_modules/@hapi/boom/lib/index.js";
 import * as baileysModule from "../../node_modules/@whiskeysockets/baileys/lib/index.js";
 import QRCode from "../../node_modules/qrcode/lib/index.js";
 import { normalizeWhatsAppPhone, nowIso } from "../utils/helpers.js";
-import { disconnectWhatsAppProvider, getActiveWhatsAppConnection, saveWhatsAppConnection } from "./whatsappConnectionService.js";
+import { supabaseAdmin } from "../utils/supabase.js";
+import {
+  decryptSecret,
+  disconnectWhatsAppProvider,
+  encryptSecret,
+  getActiveWhatsAppConnection,
+  saveWhatsAppConnection
+} from "./whatsappConnectionService.js";
 import { getGeneratedWebsiteVideoFilePath } from "./videoCaptureService.js";
 
 const { Boom } = boomModule;
@@ -17,15 +24,192 @@ const {
 
 const QR_EXPIRY_MS = 120000;
 const SESSION_ROOT = path.resolve(process.cwd(), process.env.WHATSAPP_QR_SESSION_DIR || ".whatsapp-sessions");
+const QR_SESSION_BACKUP_KEY_PREFIX = "qr_session_backup:";
 
 const sessionSockets = new Map();
 const sessionState = new Map();
 const sessionQrTimers = new Map();
 const qrSubscribers = new Map();
 const sessionRestorePromises = new Map();
+const sessionBackupTimers = new Map();
 
 function getSessionDir(userId) {
   return path.join(SESSION_ROOT, String(userId));
+}
+
+function buildSessionBackupKey(userId) {
+  return `${QR_SESSION_BACKUP_KEY_PREFIX}${userId}`;
+}
+
+async function clearScheduledSessionBackup(userId) {
+  const timer = sessionBackupTimers.get(userId);
+  if (!timer) {
+    return;
+  }
+
+  clearTimeout(timer);
+  sessionBackupTimers.delete(userId);
+}
+
+async function listSessionFilesRecursive(rootDir) {
+  const entries = await fs.readdir(rootDir, { withFileTypes: true });
+  const files = [];
+
+  for (const entry of entries) {
+    const fullPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await listSessionFilesRecursive(fullPath)));
+      continue;
+    }
+
+    files.push(fullPath);
+  }
+
+  return files;
+}
+
+async function readStoredSessionBackup(userId) {
+  const { data, error } = await supabaseAdmin
+    .from("admin_settings")
+    .select("value")
+    .eq("key", buildSessionBackupKey(userId))
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(data.value);
+    const decrypted = decryptSecret(parsed?.payload);
+    if (!decrypted) {
+      return null;
+    }
+
+    const restored = JSON.parse(decrypted);
+    if (!restored?.files || typeof restored.files !== "object") {
+      return null;
+    }
+
+    return restored;
+  } catch (error) {
+    console.error(`[ReachIQ][qr] could not parse stored session backup for ${userId}`, error);
+    return null;
+  }
+}
+
+async function writeStoredSessionBackup(userId, payload) {
+  const serializedPayload = encryptSecret(JSON.stringify(payload));
+  if (!serializedPayload) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin
+    .from("admin_settings")
+    .upsert(
+      {
+        key: buildSessionBackupKey(userId),
+        value: JSON.stringify({
+          payload: serializedPayload,
+          updated_at: nowIso()
+        }),
+        updated_at: nowIso()
+      },
+      { onConflict: "key" }
+    );
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function clearStoredSessionBackup(userId) {
+  const { error } = await supabaseAdmin
+    .from("admin_settings")
+    .delete()
+    .eq("key", buildSessionBackupKey(userId));
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function persistSessionBackup(userId) {
+  const sessionDir = getSessionDir(userId);
+  let files;
+
+  try {
+    files = await listSessionFilesRecursive(sessionDir);
+  } catch {
+    return;
+  }
+
+  if (!files.length) {
+    return;
+  }
+
+  const payload = {
+    userId,
+    updatedAt: nowIso(),
+    files: {}
+  };
+
+  for (const filePath of files) {
+    const relativePath = path.relative(sessionDir, filePath).replace(/\\/g, "/");
+    const raw = await fs.readFile(filePath);
+    payload.files[relativePath] = raw.toString("base64");
+  }
+
+  await writeStoredSessionBackup(userId, payload);
+}
+
+function scheduleSessionBackup(userId) {
+  void clearScheduledSessionBackup(userId);
+  const timer = setTimeout(() => {
+    void persistSessionBackup(userId).catch((error) => {
+      console.error(`[ReachIQ][qr] failed to persist WhatsApp session backup for ${userId}`, error);
+    }).finally(() => {
+      sessionBackupTimers.delete(userId);
+    });
+  }, 900);
+  sessionBackupTimers.set(userId, timer);
+}
+
+async function restoreSessionFilesFromBackup(userId) {
+  const backup = await readStoredSessionBackup(userId);
+  if (!backup?.files) {
+    return false;
+  }
+
+  const sessionDir = getSessionDir(userId);
+  await fs.mkdir(sessionDir, { recursive: true });
+
+  for (const [relativePath, encoded] of Object.entries(backup.files)) {
+    const targetPath = path.join(sessionDir, relativePath);
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, Buffer.from(String(encoded), "base64"));
+  }
+
+  return true;
+}
+
+async function listUsersWithStoredSessionBackups() {
+  const { data, error } = await supabaseAdmin
+    .from("admin_settings")
+    .select("key")
+    .like("key", `${QR_SESSION_BACKUP_KEY_PREFIX}%`);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || [])
+    .map((entry) => String(entry.key || "").slice(QR_SESSION_BACKUP_KEY_PREFIX.length))
+    .filter(Boolean);
 }
 
 function emitToSubscribers(userId, payload) {
@@ -146,6 +330,10 @@ export async function getStoredLinkedQrSessionInfo(userId) {
       phoneNumber
     };
   } catch {
+    const restored = await restoreSessionFilesFromBackup(userId).catch(() => false);
+    if (restored) {
+      return getStoredLinkedQrSessionInfo(userId);
+    }
     return null;
   }
 }
@@ -179,11 +367,13 @@ export async function disconnectQRSession(userId, { clearAuth = true } = {}) {
 
   sessionSockets.delete(userId);
   await clearQrExpiry(userId);
+  await clearScheduledSessionBackup(userId);
   sessionState.delete(userId);
   await disconnectWhatsAppProvider(userId, "qr");
 
   if (clearAuth) {
     await cleanupSessionFiles(userId);
+    await clearStoredSessionBackup(userId).catch(() => null);
   }
 
   emitToSubscribers(userId, { type: "status", status: "disconnected" });
@@ -195,7 +385,10 @@ export async function restoreQRSessionIfAvailable(userId) {
     return getQRSessionSnapshot(userId);
   }
 
-  const hasSavedSession = await hasSavedSessionFiles(userId);
+  let hasSavedSession = await hasSavedSessionFiles(userId);
+  if (!hasSavedSession) {
+    hasSavedSession = await restoreSessionFilesFromBackup(userId);
+  }
   if (!hasSavedSession) {
     return null;
   }
@@ -240,7 +433,13 @@ export async function restoreSavedQRSessionsOnBoot() {
   try {
     await fs.mkdir(SESSION_ROOT, { recursive: true });
     const entries = await fs.readdir(SESSION_ROOT, { withFileTypes: true });
-    const userIds = entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
+    const backupUserIds = await listUsersWithStoredSessionBackups().catch(() => []);
+    const userIds = Array.from(
+      new Set([
+        ...entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
+        ...backupUserIds
+      ])
+    );
 
     for (const userId of userIds) {
       try {
@@ -258,9 +457,16 @@ async function buildSocket(userId, forceFresh = false) {
   const sessionDir = getSessionDir(userId);
   if (forceFresh) {
     await cleanupSessionFiles(userId);
+    await clearStoredSessionBackup(userId).catch(() => null);
   }
 
   await fs.mkdir(sessionDir, { recursive: true });
+
+  if (!forceFresh && !(await hasSavedSessionFiles(userId))) {
+    await restoreSessionFilesFromBackup(userId).catch((error) => {
+      console.error(`[ReachIQ][qr] failed to restore session backup before socket build for ${userId}`, error);
+    });
+  }
 
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
   const { version } = await fetchLatestBaileysVersion();
@@ -275,6 +481,9 @@ async function buildSocket(userId, forceFresh = false) {
   sock.ev.on("creds.update", (...args) => {
     Promise.resolve(saveCreds(...args)).catch((error) => {
       console.error(`[ReachIQ][qr] creds.update save failed for ${userId}`, error);
+      return;
+    }).then(() => {
+      scheduleSessionBackup(userId);
     });
   });
   sessionSockets.set(userId, sock);
@@ -346,6 +555,7 @@ async function buildSocket(userId, forceFresh = false) {
           socketUser: socketUser || snapshotBeforeSave.socketUser || null,
           lastActiveAt: activeAt
         });
+        scheduleSessionBackup(userId);
         const snapshot = getQRSessionSnapshot(userId);
         emitToSubscribers(userId, {
           type: "connected",
