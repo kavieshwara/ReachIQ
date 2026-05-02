@@ -93,6 +93,29 @@ function getDraftAssetHint(kind: "website" | "message" | "video", preparation: a
   return "Message draft not ready yet";
 }
 
+function getPreparationErrorDisplay(item: any, preparation: any) {
+  if (item?.error_message) {
+    return item.error_message;
+  }
+
+  const generationError = String(preparation?.generation_error || "").trim();
+  if (!generationError) {
+    return "-";
+  }
+
+  const stalePreviewFailure =
+    /could not load the generated website preview/i.test(generationError) ||
+    /503 service unavailable/i.test(generationError) ||
+    /reachiq-hqzc\.onrender\.com/i.test(generationError) ||
+    /localhost:4001/i.test(generationError);
+
+  if (stalePreviewFailure && resolvePreviewUrl(preparation)) {
+    return "Preview repaired. Click Launch again to retry video capture on the live hosted site.";
+  }
+
+  return generationError;
+}
+
 export default function CampaignDetailPage() {
   const params = useParams<{ id: string }>();
   const campaignId = params?.id ?? "";
@@ -319,7 +342,7 @@ export default function CampaignDetailPage() {
                       <td className="px-3 py-2 text-textSecondary">{formatDate(item.sent_at)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatDate(item.delivered_at)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatDate(item.read_at)}</td>
-                      <td className="px-3 py-2 text-danger">{item.error_message || preparation?.generation_error || "-"}</td>
+                      <td className="px-3 py-2 text-danger">{getPreparationErrorDisplay(item, preparation)}</td>
                     </tr>
                   );
                 })}
