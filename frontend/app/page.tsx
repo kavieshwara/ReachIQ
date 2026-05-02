@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   Bot,
@@ -40,6 +41,7 @@ const features = [
 
 export default function LandingPage() {
   const [settings, setSettings] = useState<any[]>([]);
+  const router = useRouter();
 
   useEffect(() => {
     fetch(buildApiUrl("/api/platform/settings"))
@@ -47,6 +49,26 @@ export default function LandingPage() {
       .then((data) => setSettings(Array.isArray(data) ? data : []))
       .catch(() => setSettings([]));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const error = url.searchParams.get("error");
+    const errorDescription = url.searchParams.get("error_description");
+
+    if (!error) {
+      return;
+    }
+
+    const safeMessage = errorDescription?.includes("exchange external code")
+      ? "Google login could not be completed. Check the Supabase Google client settings, the Google callback URL in Google Cloud, and whether this Google account is allowed to use the OAuth app."
+      : errorDescription || "Authentication could not be completed right now.";
+
+    router.replace(`/login?authError=${encodeURIComponent(safeMessage)}`);
+  }, [router]);
 
   const announcement = settings.find((item) => item.key === "platform_announcement")?.value;
 

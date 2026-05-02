@@ -175,6 +175,27 @@ function isRecoverableWebsiteGenerationError(error) {
   );
 }
 
+function normalizePreparationAssetUrls(preparation) {
+  if (!preparation) {
+    return preparation;
+  }
+
+  const websiteLiveUrl = resolveGeneratedWebsitePreviewUrl({
+    websiteId: preparation.generated_website_id,
+    liveUrl: preparation.website_live_url
+  });
+  const videoUrl = resolveGeneratedWebsiteVideoUrl({
+    videoId: preparation.campaign_lead_id,
+    videoUrl: preparation.video_url
+  });
+
+  return {
+    ...preparation,
+    website_live_url: websiteLiveUrl || null,
+    video_url: videoUrl || null
+  };
+}
+
 async function getCampaignPreparation(campaignId, campaignLeadId) {
   const { data, error } = await supabaseAdmin
     .from("outreach_preparations")
@@ -623,10 +644,27 @@ export async function getCampaignPreparations(campaignId) {
 
   if (error) {
     if (isMissingOutreachPreparationsTable(error)) {
-      return listCompatLeadPreparations(campaignId);
+      const compatPreparations = await listCompatLeadPreparations(campaignId);
+      const normalizedPreparations = [];
+
+      for (const preparation of compatPreparations) {
+        const normalizedPreparation = normalizePreparationAssetUrls(preparation);
+        if (
+          normalizedPreparation.website_live_url !== preparation.website_live_url ||
+          normalizedPreparation.video_url !== preparation.video_url
+        ) {
+          await upsertCompatLeadPreparation(campaignId, preparation.campaign_lead_id, {
+            website_live_url: normalizedPreparation.website_live_url,
+            video_url: normalizedPreparation.video_url
+          });
+        }
+        normalizedPreparations.push(normalizedPreparation);
+      }
+
+      return normalizedPreparations;
     }
     throw error;
   }
 
-  return data || [];
+  return (data || []).map(normalizePreparationAssetUrls);
 }

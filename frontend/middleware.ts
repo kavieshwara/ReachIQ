@@ -3,6 +3,7 @@ import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
 
 const primaryHostedHost = "reachiq-zeta.vercel.app";
 const legacyHostedHosts = new Set(["reachiq-kavieshwaras-projects.vercel.app"]);
+const hostedReachiqHostPattern = /^reachiq(?:-[a-z0-9-]+)?\.vercel\.app$/i;
 
 const protectedPrefixes = [
   "/dashboard",
@@ -25,7 +26,11 @@ function isProtectedPath(pathname: string) {
 }
 
 export async function middleware(req: NextRequest) {
-  if (legacyHostedHosts.has(req.nextUrl.hostname)) {
+  const shouldCanonicalizeHostedDomain =
+    req.nextUrl.hostname !== primaryHostedHost &&
+    (legacyHostedHosts.has(req.nextUrl.hostname) || hostedReachiqHostPattern.test(req.nextUrl.hostname));
+
+  if (shouldCanonicalizeHostedDomain) {
     const redirectUrl = req.nextUrl.clone();
     redirectUrl.protocol = "https:";
     redirectUrl.host = primaryHostedHost;

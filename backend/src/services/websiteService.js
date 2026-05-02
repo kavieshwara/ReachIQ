@@ -2,6 +2,13 @@ import crypto from "node:crypto";
 import { supabaseAdmin } from "../utils/supabase.js";
 import { ensureStarterWebsiteTemplates } from "../data/starterWebsiteTemplates.js";
 
+const FALLBACK_PRODUCTION_PREVIEW_BASE_URL = "https://reachiq-api.onrender.com";
+const LEGACY_PREVIEW_HOST_PATTERNS = [
+  /reachiq-hqzc\.onrender\.com/i,
+  /localhost/i,
+  /127\.0\.0\.1/i
+];
+
 function fillTemplate(template, values) {
   return Object.entries(values).reduce(
     (result, [key, value]) => result.replaceAll(`{{${key}}}`, value || ""),
@@ -16,7 +23,15 @@ export function buildPreviewBaseUrl() {
     process.env.API_PUBLIC_URL;
 
   if (explicitBase) {
-    return explicitBase.replace(/\/$/, "");
+    const normalized = explicitBase.replace(/\/$/, "");
+    const looksLegacy = LEGACY_PREVIEW_HOST_PATTERNS.some((pattern) => pattern.test(normalized));
+    if (!looksLegacy) {
+      return normalized;
+    }
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return FALLBACK_PRODUCTION_PREVIEW_BASE_URL;
   }
 
   return `http://localhost:${process.env.PORT || 4001}`;

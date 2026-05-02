@@ -17,6 +17,12 @@ const OVERPASS_API_URLS = Array.from(
 );
 const NOMINATIM_SEARCH_URL =
   process.env.NOMINATIM_SEARCH_URL || "https://nominatim.openstreetmap.org/search";
+const DEFAULT_FETCH_TIMEOUT_MS = Number(process.env.MAPS_FETCH_TIMEOUT_MS || 12000);
+const NOMINATIM_TIMEOUT_MS = Number(process.env.NOMINATIM_TIMEOUT_MS || 8000);
+const OVERPASS_TIMEOUT_MS = Number(process.env.OVERPASS_TIMEOUT_MS || 18000);
+const SERPER_TIMEOUT_MS = Number(process.env.SERPER_TIMEOUT_MS || 12000);
+const OUTSCRAPER_TIMEOUT_MS = Number(process.env.OUTSCRAPER_TIMEOUT_MS || 15000);
+const WEBSITE_CHECK_TIMEOUT_MS = Number(process.env.WEBSITE_CHECK_TIMEOUT_MS || 9000);
 
 const nicheToOSMTag = {
   "dental clinic": { key: "amenity", value: "dentist" },
@@ -312,18 +318,16 @@ async function geocodeCityBounds(city) {
   query.searchParams.set("format", "jsonv2");
   query.searchParams.set("limit", "1");
 
-  const response = await fetch(query, {
-    headers: {
-      Accept: "application/json",
-      "User-Agent": "ReachIQ/1.0"
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Nominatim geocode failed: HTTP ${response.status}`);
-  }
-
-  const results = await response.json();
+  const results = await fetchJson(
+    query,
+    {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "ReachIQ/1.0"
+      }
+    },
+    NOMINATIM_TIMEOUT_MS
+  );
   const boundingbox = results?.[0]?.boundingbox;
   if (!boundingbox || boundingbox.length !== 4) {
     return null;
@@ -386,8 +390,25 @@ function normalizeOutscraperEntry(entry, city, niche) {
   });
 }
 
-async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+async function fetchJson(url, options = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`Request timed out after ${timeoutMs}ms`)), timeoutMs);
+
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+
   const text = await response.text();
   let json = {};
 
@@ -486,15 +507,19 @@ export async function searchOverpass(niche, city, limit = 20) {
   for (const query of queries) {
     for (const endpoint of endpoints) {
       try {
-        const data = await fetchJson(endpoint, {
-          method: "POST",
-          body: `data=${encodeURIComponent(query)}`,
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            Accept: "application/json,text/plain,*/*",
-            "User-Agent": "ReachIQ/1.0"
-          }
-        });
+        const data = await fetchJson(
+          endpoint,
+          {
+            method: "POST",
+            body: `data=${encodeURIComponent(query)}`,
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+              Accept: "application/json,text/plain,*/*",
+              "User-Agent": "ReachIQ/1.0"
+            }
+          },
+          OVERPASS_TIMEOUT_MS
+        );
 
         const normalizedResults = (data.elements || [])
           .filter((entry) => entry.tags?.name)
@@ -520,19 +545,23 @@ export async function searchSerper(niche, city, limit = 20) {
     throw new Error("Serper key not configured");
   }
 
-  const data = await fetchJson("https://google.serper.dev/maps", {
-    method: "POST",
-    headers: {
-      "X-API-KEY": process.env.SERPER_API_KEY,
-      "Content-Type": "application/json"
+  const data = await fetchJson(
+    "https://google.serper.dev/maps",
+    {
+      method: "POST",
+      headers: {
+        "X-API-KEY": process.env.SERPER_API_KEY,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        q: `${normalizedNiche} in ${normalizedCity}, India`,
+        gl: "in",
+        hl: "en",
+        num: Math.max(limit, 20)
+      })
     },
-    body: JSON.stringify({
-      q: `${normalizedNiche} in ${normalizedCity}, India`,
-      gl: "in",
-      hl: "en",
-      num: Math.max(limit, 20)
-    })
-  });
+    SERPER_TIMEOUT_MS
+  );
 
   return (data.places || []).slice(0, limit).map((entry) => normalizeSerperEntry(entry, normalizedCity, normalizedNiche));
 }
@@ -546,11 +575,15 @@ export async function searchOutscraper(niche, city, limit = 20) {
 
   const query = `${normalizedNiche} in ${normalizedCity}, India`;
   const url = `https://api.app.outscraper.com/maps/search-v3?query=${encodeURIComponent(query)}&limit=${limit}&async=false`;
-  const data = await fetchJson(url, {
-    headers: {
-      "X-API-KEY": process.env.OUTSCRAPER_API_KEY
-    }
-  });
+  const data = await fetchJson(
+    url,
+    {
+      headers: {
+        "X-API-KEY": process.env.OUTSCRAPER_API_KEY
+      }
+    },
+    OUTSCRAPER_TIMEOUT_MS
+  );
 
   return (data.data?.[0] || []).slice(0, limit).map((entry) => normalizeOutscraperEntry(entry, normalizedCity, normalizedNiche));
 }
@@ -562,19 +595,23 @@ export async function checkWebsite(businessName, city) {
   }
 
   try {
-    const data = await fetchJson("https://google.serper.dev/search", {
-      method: "POST",
-      headers: {
-        "X-API-KEY": process.env.SERPER_API_KEY,
-        "Content-Type": "application/json"
+    const data = await fetchJson(
+      "https://google.serper.dev/search",
+      {
+        method: "POST",
+        headers: {
+          "X-API-KEY": process.env.SERPER_API_KEY,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          q: `"${businessName}" ${normalizedCity} India website`,
+          gl: "in",
+          hl: "en",
+          num: 3
+        })
       },
-      body: JSON.stringify({
-        q: `"${businessName}" ${normalizedCity} India website`,
-        gl: "in",
-        hl: "en",
-        num: 3
-      })
-    });
+      WEBSITE_CHECK_TIMEOUT_MS
+    );
 
     const organicResults = data.organic || [];
     for (const result of organicResults) {

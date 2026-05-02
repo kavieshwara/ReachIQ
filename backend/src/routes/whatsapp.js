@@ -76,11 +76,21 @@ async function buildStoredQrRecoveredStatus(userId, connections = []) {
 }
 
 async function buildStaleQrDisconnectedStatus(userId, connection, connections = []) {
+  let refreshedConnections = connections;
   if (connection?.provider_type === "qr" && hasRecoverableQrConnection(connections)) {
     try {
       await disconnectWhatsAppProvider(userId, "qr");
+      refreshedConnections = await getAllWhatsAppConnections(userId);
     } catch (error) {
       console.warn(`[ReachIQ][qr] could not mark stale QR connection disconnected for ${userId}: ${error.message}`);
+      refreshedConnections = connections.map((item) =>
+        item.provider_type === "qr"
+          ? {
+              ...item,
+              status: "disconnected"
+            }
+          : item
+      );
     }
   }
 
@@ -94,7 +104,7 @@ async function buildStaleQrDisconnectedStatus(userId, connection, connections = 
     qrImage: null,
     expiresAt: null,
     metaVerified: false,
-    connections: connections.map(serializeConnectionForClient)
+    connections: refreshedConnections.map(serializeConnectionForClient)
   };
 }
 

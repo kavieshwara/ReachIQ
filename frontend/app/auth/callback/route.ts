@@ -1,6 +1,18 @@
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import { preferredHostedAppUrl } from "@/lib/public-url";
+
+function buildHostedRedirectUrl(pathname: string, requestUrl: URL) {
+  const redirectUrl = new URL(pathname, requestUrl);
+  const shouldCanonicalizeHostedDomain = /vercel\.app$/i.test(requestUrl.hostname);
+
+  if (shouldCanonicalizeHostedDomain) {
+    return new URL(pathname, preferredHostedAppUrl);
+  }
+
+  return redirectUrl;
+}
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
@@ -10,7 +22,7 @@ export async function GET(request: NextRequest) {
   const errorDescription = requestUrl.searchParams.get("error_description");
 
   if (error) {
-    const redirectUrl = new URL("/login", request.url);
+    const redirectUrl = buildHostedRedirectUrl("/login", requestUrl);
     const safeMessage = errorDescription?.includes("exchange external code")
       ? "Google login could not be completed. Check the Supabase Google client settings, the Supabase callback URL in Google Cloud, and make sure this Google account is allowed as a test user if the OAuth app is still in testing."
       : errorDescription || "Google login could not be completed right now.";
@@ -30,7 +42,7 @@ export async function GET(request: NextRequest) {
         throw exchangeError;
       }
     } catch {
-      const redirectUrl = new URL("/login", request.url);
+      const redirectUrl = buildHostedRedirectUrl("/login", requestUrl);
       redirectUrl.searchParams.set(
         "authError",
         "Google login could not be completed. Verify the Supabase Google provider settings, the Google Cloud redirect URI, and whether this Google account is allowed to use the OAuth app."
@@ -43,5 +55,5 @@ export async function GET(request: NextRequest) {
   }
 
   const destination = next && next.startsWith("/") ? next : "/dashboard";
-  return NextResponse.redirect(new URL(destination, request.url));
+  return NextResponse.redirect(buildHostedRedirectUrl(destination, requestUrl));
 }
