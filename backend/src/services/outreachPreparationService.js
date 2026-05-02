@@ -1,6 +1,6 @@
 import { generatePersonalizedOutreachMessage } from "./geminiService.js";
 import { generateWebsite, resolveGeneratedWebsitePreviewUrl } from "./websiteService.js";
-import { captureGeneratedWebsiteVideo, isWebsiteVideoEnabled } from "./videoCaptureService.js";
+import { captureGeneratedWebsiteVideo, isWebsiteVideoEnabled, resolveGeneratedWebsiteVideoUrl } from "./videoCaptureService.js";
 import { interpolateTemplate, nowIso } from "../utils/helpers.js";
 import { supabaseAdmin } from "../utils/supabase.js";
 import {
@@ -453,6 +453,22 @@ async function ensureVideoPrepared({ campaign, campaignLead, lead, preparation, 
   }
 
   if (preparation.video_status === "ready" && preparation.video_url) {
+    const normalizedVideoUrl = resolveGeneratedWebsiteVideoUrl({
+      videoId: campaignLead.id,
+      videoUrl: preparation.video_url
+    });
+
+    if (normalizedVideoUrl !== preparation.video_url) {
+      return upsertPreparation(campaign.id, campaignLead.id, {
+        ...preparation,
+        user_id: campaign.user_id,
+        campaign_id: campaign.id,
+        lead_id: lead.id,
+        video_url: normalizedVideoUrl,
+        generation_error: null
+      });
+    }
+
     return preparation;
   }
 
@@ -576,7 +592,10 @@ export async function prepareCampaignLeadOutreach({ campaign, campaignLead, lead
       preparation,
       websiteUrl: websitePrepared.websiteUrl,
       personalizedMessage: messagePrepared.messageText,
-      videoUrl: preparation.video_url || ""
+      videoUrl: resolveGeneratedWebsiteVideoUrl({
+        videoId: campaignLead.id,
+        videoUrl: preparation.video_url
+      })
     };
   } catch (error) {
     const failedPreparation = await upsertPreparation(campaign.id, campaignLead.id, {

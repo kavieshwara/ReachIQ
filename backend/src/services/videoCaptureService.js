@@ -305,6 +305,28 @@ export function buildGeneratedWebsiteVideoUrl(videoId) {
   return `${buildPreviewBaseUrl()}/preview-video/${videoId}`;
 }
 
+export function resolveGeneratedWebsiteVideoUrl({ videoId, videoUrl }) {
+  if (videoId) {
+    return buildGeneratedWebsiteVideoUrl(videoId);
+  }
+
+  const normalizedVideoUrl = String(videoUrl || "").trim();
+  if (!normalizedVideoUrl) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(normalizedVideoUrl);
+    if (parsed.pathname.startsWith("/preview-video/")) {
+      return `${buildPreviewBaseUrl()}${parsed.pathname}${parsed.search}`;
+    }
+  } catch {
+    // Ignore invalid URLs and fall back to the stored value.
+  }
+
+  return normalizedVideoUrl;
+}
+
 export function getGeneratedWebsiteVideoFilePath(videoId) {
   return path.join(VIDEO_ROOT, `${videoId}.mp4`);
 }

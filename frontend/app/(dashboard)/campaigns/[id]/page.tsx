@@ -32,6 +32,23 @@ function resolvePreviewUrl(preparation: any) {
   return "";
 }
 
+function resolveVideoUrl(preparation: any) {
+  if (!preparation?.video_url) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(preparation.video_url);
+    if (parsed.pathname.startsWith("/preview-video/")) {
+      return buildApiUrl(`${parsed.pathname}${parsed.search}`);
+    }
+  } catch {
+    // Ignore invalid URLs and fall back to the stored value below.
+  }
+
+  return preparation.video_url;
+}
+
 function formatPreparationStatus(kind: "website" | "message" | "video", value?: string | null) {
   if (!value || value === "pending") {
     return "pending";
@@ -275,9 +292,9 @@ export default function CampaignDetailPage() {
                           ) : (
                             <p className="text-xs text-textMuted">{getDraftAssetHint("website", preparation)}</p>
                           )}
-                          {preparation?.video_url ? (
+                          {resolveVideoUrl(preparation) ? (
                             <a
-                              href={preparation.video_url}
+                              href={resolveVideoUrl(preparation)}
                               target="_blank"
                               rel="noreferrer"
                               className="block text-xs font-medium text-primary underline-offset-4 hover:underline"
