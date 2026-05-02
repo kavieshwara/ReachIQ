@@ -19,8 +19,9 @@ function resolvePreviewUrl(preparation: any) {
   if (preparation?.website_live_url) {
     try {
       const parsed = new URL(preparation.website_live_url);
-      if (parsed.pathname.startsWith("/preview/")) {
-        return buildApiUrl(`${parsed.pathname}${parsed.search}`);
+      const previewPath = parsed.pathname.replace(/^\/api\/websites(?=\/preview\/)/i, "");
+      if (previewPath.startsWith("/preview/")) {
+        return buildApiUrl(`${previewPath}${parsed.search}`);
       }
     } catch {
       // Ignore invalid URLs and fall back to the stored value below.
@@ -39,8 +40,9 @@ function resolveVideoUrl(preparation: any) {
 
   try {
     const parsed = new URL(preparation.video_url);
-    if (parsed.pathname.startsWith("/preview-video/")) {
-      return buildApiUrl(`${parsed.pathname}${parsed.search}`);
+    const previewVideoPath = parsed.pathname.replace(/^\/api\/websites(?=\/preview-video\/)/i, "");
+    if (previewVideoPath.startsWith("/preview-video/")) {
+      return buildApiUrl(`${previewVideoPath}${parsed.search}`);
     }
   } catch {
     // Ignore invalid URLs and fall back to the stored value below.

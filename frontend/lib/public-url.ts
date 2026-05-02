@@ -12,11 +12,26 @@ function normalizeUrl(value?: string | null) {
 }
 
 const preferredHostedAppUrl = "https://reachiq-zeta.vercel.app";
+const legacyHostedAppUrls = new Set([
+  "https://reachiq-kavieshwaras-projects.vercel.app"
+]);
+
+function canonicalizeHostedAppUrl(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  if (legacyHostedAppUrls.has(value)) {
+    return preferredHostedAppUrl;
+  }
+
+  return value;
+}
 
 export function resolveStaticAppUrl() {
-  const explicitUrl = normalizeUrl(process.env.NEXT_PUBLIC_APP_URL);
+  const explicitUrl = canonicalizeHostedAppUrl(normalizeUrl(process.env.NEXT_PUBLIC_APP_URL));
   const looksLocal = explicitUrl ? /localhost|127\.0\.0\.1/i.test(explicitUrl) : false;
-  const vercelUrl = normalizeUrl(process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL);
+  const vercelUrl = canonicalizeHostedAppUrl(normalizeUrl(process.env.NEXT_PUBLIC_VERCEL_URL || process.env.VERCEL_URL));
 
   if (explicitUrl && !looksLocal) {
     return explicitUrl;

@@ -317,8 +317,9 @@ export function resolveGeneratedWebsiteVideoUrl({ videoId, videoUrl }) {
 
   try {
     const parsed = new URL(normalizedVideoUrl);
-    if (parsed.pathname.startsWith("/preview-video/")) {
-      return `${buildPreviewBaseUrl()}${parsed.pathname}${parsed.search}`;
+    const previewVideoPath = parsed.pathname.replace(/^\/api\/websites(?=\/preview-video\/)/i, "");
+    if (previewVideoPath.startsWith("/preview-video/")) {
+      return `${buildPreviewBaseUrl()}${previewVideoPath}${parsed.search}`;
     }
   } catch {
     // Ignore invalid URLs and fall back to the stored value.

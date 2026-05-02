@@ -46,8 +46,9 @@ export function resolveGeneratedWebsitePreviewUrl({ websiteId, liveUrl }) {
 
   try {
     const parsed = new URL(normalizedLiveUrl);
-    if (parsed.pathname.startsWith("/preview/")) {
-      return `${buildPreviewBaseUrl()}${parsed.pathname}${parsed.search}`;
+    const previewPath = parsed.pathname.replace(/^\/api\/websites(?=\/preview\/)/i, "");
+    if (previewPath.startsWith("/preview/")) {
+      return `${buildPreviewBaseUrl()}${previewPath}${parsed.search}`;
     }
   } catch {
     // Ignore invalid URLs and fall back to the stored value.
