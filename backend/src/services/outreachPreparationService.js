@@ -184,10 +184,13 @@ function normalizePreparationAssetUrls(preparation) {
     websiteId: preparation.generated_website_id,
     liveUrl: preparation.website_live_url
   });
-  const videoUrl = resolveGeneratedWebsiteVideoUrl({
-    videoId: preparation.campaign_lead_id,
-    videoUrl: preparation.video_url
-  });
+  const videoUrl =
+    preparation.video_status === "ready" || preparation.video_url
+      ? resolveGeneratedWebsiteVideoUrl({
+          videoId: preparation.campaign_lead_id,
+          videoUrl: preparation.video_url
+        })
+      : "";
 
   return {
     ...preparation,
