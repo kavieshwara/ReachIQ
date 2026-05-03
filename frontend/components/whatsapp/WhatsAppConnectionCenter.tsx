@@ -107,15 +107,18 @@ export function WhatsAppConnectionCenter() {
     setStatus(data);
 
     if (data.providerType === "qr") {
-      setQrState((current) => ({
-        ...current,
-        status: data.status || current.status,
-        qrImage: (data as any).qrImage || current.qrImage,
-        expiresAt: (data as any).expiresAt || current.expiresAt,
-        phoneNumber: data.phoneNumber || current.phoneNumber,
-        lastActiveAt: data.lastActiveAt || current.lastActiveAt
-      }));
-    } else if (data.providerType === "meta") {
+      const nextStatus = data.status || "disconnected";
+      setQrState({
+        status: nextStatus,
+        qrImage: nextStatus === "connected" ? null : (data as any).qrImage ?? null,
+        expiresAt: nextStatus === "connected" ? null : (data as any).expiresAt ?? null,
+        phoneNumber: data.phoneNumber ?? null,
+        lastActiveAt: data.lastActiveAt ?? null
+      });
+      return;
+    }
+
+    if (data.providerType === "meta" || !data.connected) {
       setQrState(initialQrState);
     }
   }, []);
@@ -132,6 +135,33 @@ export function WhatsAppConnectionCenter() {
       if (refreshTimeoutRef.current) {
         window.clearTimeout(refreshTimeoutRef.current);
       }
+    };
+  }, [loadStatus]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const refresh = () => {
+      void loadStatus().catch(() => null);
+    };
+
+    const intervalId = window.setInterval(refresh, 15000);
+    const handleFocus = () => refresh();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [loadStatus]);
 

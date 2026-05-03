@@ -173,11 +173,29 @@ app.listen(port, async () => {
   console.log(`ReachIQ backend running on port ${port}`);
   startDailyResetCron();
 
+  const scheduleVideoCleanup = async () => {
+    try {
+      const { cleanupStaleVideoArtifacts } = await import("./services/videoCaptureService.js");
+      const result = await cleanupStaleVideoArtifacts();
+      if (result?.removedTempArtifacts || result?.removedFinalVideos) {
+        console.info(
+          `[ReachIQ] cleaned stale video artifacts: temp=${result.removedTempArtifacts || 0}, final=${result.removedFinalVideos || 0}`
+        );
+      }
+    } catch (error) {
+      console.error("[ReachIQ] stale video cleanup failed", error);
+    }
+  };
+
   try {
-    const { cleanupStaleVideoArtifacts } = await import("./services/videoCaptureService.js");
-    await cleanupStaleVideoArtifacts();
+    await scheduleVideoCleanup();
+    const cleanupIntervalMs = Math.max(60_000, Number(process.env.WEBSITE_VIDEO_CLEANUP_INTERVAL_MS || 1000 * 60 * 15));
+    const cleanupTimer = setInterval(() => {
+      void scheduleVideoCleanup();
+    }, cleanupIntervalMs);
+    cleanupTimer.unref?.();
   } catch (error) {
-    console.error("[ReachIQ] stale video cleanup failed on boot", error);
+    console.error("[ReachIQ] stale video cleanup scheduling failed on boot", error);
   }
 
   const shouldRestoreQrSessions =

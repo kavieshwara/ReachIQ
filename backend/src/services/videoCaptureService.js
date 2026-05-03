@@ -393,9 +393,11 @@ export async function releaseGeneratedWebsiteVideo(videoId, { removeStorage = fa
 export async function cleanupStaleVideoArtifacts() {
   const captureRoot = path.join(os.tmpdir(), "reachiq-video-capture");
   const maxArtifactAgeMs = Number(process.env.WEBSITE_VIDEO_TEMP_TTL_MS || 1000 * 60 * 30);
-  const maxFinalVideoAgeMs = Number(process.env.WEBSITE_VIDEO_FINAL_TTL_MS || 1000 * 60 * 60 * 6);
+  const maxFinalVideoAgeMs = Number(process.env.WEBSITE_VIDEO_FINAL_TTL_MS || 1000 * 60 * 60);
   const cutoff = Date.now() - maxArtifactAgeMs;
   const finalCutoff = Date.now() - maxFinalVideoAgeMs;
+  let removedTempArtifacts = 0;
+  let removedFinalVideos = 0;
 
   const cleanupEntries = async (rootDir) => {
     let entries = [];
@@ -411,7 +413,13 @@ export async function cleanupStaleVideoArtifacts() {
         try {
           const stats = await fs.stat(targetPath);
           if (stats.mtimeMs < cutoff) {
-            await fs.rm(targetPath, { recursive: entry.isDirectory(), force: true }).catch(() => null);
+            const removed = await fs
+              .rm(targetPath, { recursive: entry.isDirectory(), force: true })
+              .then(() => true)
+              .catch(() => false);
+            if (removed) {
+              removedTempArtifacts += 1;
+            }
           }
         } catch {
           // Ignore cleanup races and continue.
@@ -438,7 +446,10 @@ export async function cleanupStaleVideoArtifacts() {
         try {
           const stats = await fs.stat(targetPath);
           if (stats.mtimeMs < finalCutoff) {
-            await fs.rm(targetPath, { force: true }).catch(() => null);
+            const removed = await fs.rm(targetPath, { force: true }).then(() => true).catch(() => false);
+            if (removed) {
+              removedFinalVideos += 1;
+            }
           }
         } catch {
           // Ignore cleanup races and continue.
@@ -449,6 +460,11 @@ export async function cleanupStaleVideoArtifacts() {
 
   await cleanupEntries(captureRoot);
   await cleanupFinalVideos(VIDEO_ROOT);
+
+  return {
+    removedTempArtifacts,
+    removedFinalVideos
+  };
 }
 
 function getStorageObjectPath(videoId) {
