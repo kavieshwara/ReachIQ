@@ -4,7 +4,7 @@ import { supabaseAdmin } from "../utils/supabase.js";
 import { buildPaginationPayload, nowIso, paginate } from "../utils/helpers.js";
 import { messageQueue } from "../queues/messageQueue.js";
 import { refreshCampaignMetrics } from "../services/campaignService.js";
-import { getCampaignAutomationConfig, removeCampaignAutomationConfig, setCampaignAutomationConfig } from "../services/campaignAutomationCompatService.js";
+import { getCampaignAutomationConfig, removeCampaignAutomationConfig, setCampaignAutomationConfig, upsertCompatLeadPreparation } from "../services/campaignAutomationCompatService.js";
 import { createNotification } from "../services/notificationService.js";
 import { getCampaignPreparations } from "../services/outreachPreparationService.js";
 import { createDemoCampaign, getDemoCampaignById, getDemoCampaigns, isDemoMode, launchDemoCampaign, updateDemoCampaign } from "../utils/demo.js";
@@ -21,6 +21,26 @@ function isMissingCampaignAutomationSchema(error) {
     message.includes("column campaigns.website_template_id does not exist") ||
     message.includes("schema cache")
   );
+}
+
+function isMissingOutreachPreparationsTable(error) {
+  const message = String(error?.message || "");
+  return (
+    message.includes("public.outreach_preparations") ||
+    message.includes("relation \"public.outreach_preparations\" does not exist")
+  );
+}
+
+async function queueCampaignProcessing(campaignId, userId, reason = "launch") {
+  if (messageQueue) {
+    await messageQueue.add(`campaign-${campaignId}-${reason}`, { campaignId, userId });
+    return;
+  }
+
+  const { processCampaignMessages } = await import("../services/campaignService.js");
+  void processCampaignMessages({ campaignId, userId }).catch((queueError) => {
+    console.error(`[Campaign ${reason}] ${queueError.message}`);
+  });
 }
 
 router.get("/", async (req, res, next) => {
@@ -295,14 +315,7 @@ router.post("/:id/launch", async (req, res, next) => {
       .single();
     if (error) throw error;
 
-    if (messageQueue) {
-      await messageQueue.add(`campaign-${data.id}`, { campaignId: data.id, userId: req.user.id });
-    } else {
-      const { processCampaignMessages } = await import("../services/campaignService.js");
-      void processCampaignMessages({ campaignId: data.id, userId: req.user.id }).catch((queueError) => {
-        console.error(`[Campaign Launch Fallback] ${queueError.message}`);
-      });
-    }
+    await queueCampaignProcessing(data.id, req.user.id, "launch");
 
     await createNotification({
       userId: req.user.id,
@@ -313,6 +326,166 @@ router.post("/:id/launch", async (req, res, next) => {
     });
 
     res.json({ success: true, campaign: data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/:id/repair-assets", async (req, res, next) => {
+  try {
+    if (isDemoMode) {
+      const campaign = updateDemoCampaign(req.params.id, { status: "running" });
+      return res.json({ success: true, campaign });
+    }
+
+    const { campaignLeadId = null, website_template_id = null } = req.body || {};
+
+    const { data: campaign, error: campaignError } = await supabaseAdmin
+      .from("campaigns")
+      .select("id, user_id, name, website_template_id, auto_generate_assets, require_video_assets")
+      .eq("id", req.params.id)
+      .eq("user_id", req.user.id)
+      .single();
+
+    if (campaignError) throw campaignError;
+
+    const automationConfig = await getCampaignAutomationConfig(campaign.id);
+    const selectedTemplateId = website_template_id || automationConfig?.websiteTemplateId || campaign.website_template_id || null;
+
+    const { data: campaignLeads, error: campaignLeadsError } = await supabaseAdmin
+      .from("campaign_leads")
+      .select("id, lead_id, status, sent_at, delivered_at, read_at, replied_at")
+      .eq("campaign_id", campaign.id);
+
+    if (campaignLeadsError) throw campaignLeadsError;
+
+    const repairableLeadRows = (campaignLeads || []).filter((item) => {
+      if (campaignLeadId && item.id !== campaignLeadId) {
+        return false;
+      }
+
+      const finalStatus = new Set(["sent", "delivered", "read", "replied"]);
+      if (finalStatus.has(String(item.status || "").trim())) {
+        return false;
+      }
+
+      return true;
+    });
+
+    if (!repairableLeadRows.length) {
+      return res.status(400).json({ error: "ReachIQ could not find any non-sent leads to repair for this campaign." });
+    }
+
+    const repairedLeadIds = repairableLeadRows.map((item) => item.id);
+
+    const nextCampaignPayload = {
+      status: "running",
+      updated_at: nowIso(),
+      website_template_id: selectedTemplateId,
+      auto_generate_assets: true,
+      require_video_assets: true
+    };
+
+    let updateCampaignError = null;
+    const fullCampaignUpdate = await supabaseAdmin
+      .from("campaigns")
+      .update(nextCampaignPayload)
+      .eq("id", campaign.id)
+      .eq("user_id", req.user.id)
+      .select()
+      .single();
+    let updatedCampaign = fullCampaignUpdate.data;
+    updateCampaignError = fullCampaignUpdate.error;
+
+    if (updateCampaignError && isMissingCampaignAutomationSchema(updateCampaignError)) {
+      const fallbackCampaignUpdate = await supabaseAdmin
+        .from("campaigns")
+        .update({
+          status: "running",
+          updated_at: nowIso()
+        })
+        .eq("id", campaign.id)
+        .eq("user_id", req.user.id)
+        .select()
+        .single();
+
+      updatedCampaign = fallbackCampaignUpdate.data;
+      updateCampaignError = fallbackCampaignUpdate.error;
+    }
+
+    if (updateCampaignError) throw updateCampaignError;
+
+    await setCampaignAutomationConfig(campaign.id, {
+      userId: req.user.id,
+      websiteTemplateId: selectedTemplateId,
+      autoGenerateAssets: true,
+      requireVideoAssets: true
+    });
+
+    const { error: leadResetError } = await supabaseAdmin
+      .from("campaign_leads")
+      .update({
+        status: "pending",
+        error_message: null,
+        sent_at: null,
+        delivered_at: null,
+        read_at: null,
+        replied_at: null
+      })
+      .in("id", repairedLeadIds);
+
+    if (leadResetError) throw leadResetError;
+
+    const preparationResetPayload = {
+      website_template_id: selectedTemplateId,
+      website_status: "pending",
+      message_status: "pending",
+      video_status: "pending",
+      send_status: "pending",
+      generation_error: null,
+      generated_website_id: null,
+      website_live_url: null,
+      personalized_message: null,
+      video_url: null,
+      updated_at: nowIso()
+    };
+
+    const { error: preparationResetError } = await supabaseAdmin
+      .from("outreach_preparations")
+      .update(preparationResetPayload)
+      .in("campaign_lead_id", repairedLeadIds);
+
+    if (preparationResetError) {
+      if (isMissingOutreachPreparationsTable(preparationResetError)) {
+        for (const leadRow of repairableLeadRows) {
+          await upsertCompatLeadPreparation(campaign.id, leadRow.id, {
+            user_id: req.user.id,
+            campaign_id: campaign.id,
+            lead_id: leadRow.lead_id,
+            ...preparationResetPayload
+          });
+        }
+      } else {
+        throw preparationResetError;
+      }
+    }
+
+    await refreshCampaignMetrics(campaign.id);
+    await queueCampaignProcessing(campaign.id, req.user.id, "repair");
+
+    await createNotification({
+      userId: req.user.id,
+      title: "Campaign assets rebuilding",
+      body: `${updatedCampaign.name} is regenerating website, message, and video assets on the live backend for ${repairableLeadRows.length} lead${repairableLeadRows.length === 1 ? "" : "s"}.`,
+      type: "success",
+      metadata: { campaignId: campaign.id, href: `/campaigns/${campaign.id}` }
+    });
+
+    return res.json({
+      success: true,
+      repairedLeadIds,
+      campaign: updatedCampaign
+    });
   } catch (error) {
     next(error);
   }

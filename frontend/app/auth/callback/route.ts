@@ -13,7 +13,7 @@ function sanitizeNextPath(value: string | null) {
 }
 
 function buildLoginRedirect(requestUrl: URL, message: string, nextPath: string) {
-  const redirectBase = resolveStaticAppUrl() || requestUrl.origin;
+  const redirectBase = requestUrl.origin || resolveStaticAppUrl();
   const redirectUrl = new URL("/login", `${redirectBase}/`);
   redirectUrl.searchParams.set("authError", message);
   if (nextPath.startsWith("/")) {
@@ -68,6 +68,6 @@ export async function GET(request: Request) {
     );
   }
 
-  const redirectBase = resolveStaticAppUrl() || requestUrl.origin;
+  const redirectBase = requestUrl.origin || resolveStaticAppUrl();
   return NextResponse.redirect(new URL(nextPath, `${redirectBase}/`), 307);
 }

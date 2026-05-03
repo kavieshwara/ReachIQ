@@ -278,6 +278,22 @@ export default function CampaignDetailPage() {
           >
             Launch
           </Button>
+          {assetsDisabledForCampaign || isLegacyHostedFailureCampaign ? (
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                try {
+                  await api.post(`/api/campaigns/${campaignId}/repair-assets`, {});
+                  toast.success("Campaign repair started. ReachIQ is rebuilding websites, messages, and videos on the live backend.");
+                } catch (error: any) {
+                  toast.error(error?.response?.data?.error || "Could not repair this campaign right now");
+                }
+                load().catch(() => null);
+              }}
+            >
+              Repair and relaunch
+            </Button>
+          ) : null}
           <Button
             variant="danger"
             disabled={deleting}
@@ -330,6 +346,23 @@ export default function CampaignDetailPage() {
                 >
                   Refresh status
                 </Button>
+                {isLegacyHostedFailureCampaign ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={async () => {
+                      try {
+                        await api.post(`/api/campaigns/${campaignId}/repair-assets`, {});
+                        toast.success("Legacy campaign repair started. ReachIQ is rebuilding assets before it retries send.");
+                      } catch (error: any) {
+                        toast.error(error?.response?.data?.error || "Could not repair this campaign right now");
+                      }
+                      load().catch(() => null);
+                    }}
+                  >
+                    Repair assets first
+                  </Button>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -346,6 +379,21 @@ export default function CampaignDetailPage() {
                   ? "Video capture was also turned off for this campaign, so ReachIQ will only prepare the message until you create a new campaign with video enabled."
                   : "Video capture is active for this campaign."}
               </p>
+              <Button
+                size="sm"
+                className="mt-3"
+                onClick={async () => {
+                  try {
+                    await api.post(`/api/campaigns/${campaignId}/repair-assets`, {});
+                    toast.success("ReachIQ is converting this older campaign into the current website + video workflow.");
+                  } catch (error: any) {
+                    toast.error(error?.response?.data?.error || "Could not rebuild this campaign with the current asset settings");
+                  }
+                  load().catch(() => null);
+                }}
+              >
+                Rebuild with website + video
+              </Button>
             </div>
           ) : null}
           {isLegacyHostedFailureCampaign ? (
@@ -354,6 +402,21 @@ export default function CampaignDetailPage() {
               <p className="mt-1">
                 Click <span className="font-medium text-textPrimary">Launch</span> once more and ReachIQ will regenerate website, message, and video assets on the current live backend before it tries to send.
               </p>
+              <Button
+                size="sm"
+                className="mt-3"
+                onClick={async () => {
+                  try {
+                    await api.post(`/api/campaigns/${campaignId}/repair-assets`, {});
+                    toast.success("Legacy hosted errors cleared. ReachIQ is rebuilding this run on the AWS backend.");
+                  } catch (error: any) {
+                    toast.error(error?.response?.data?.error || "Could not repair this campaign right now");
+                  }
+                  load().catch(() => null);
+                }}
+              >
+                Repair on live backend
+              </Button>
             </div>
           ) : null}
         </CardContent>

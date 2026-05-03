@@ -25,12 +25,20 @@ function createBrowserSupabaseClient() {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: false
       }
     });
   }
 
-  return createClientComponentClient();
+  return createClientComponentClient({
+    options: {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false
+      }
+    } as any
+  });
 }
 
 export function getSupabaseBrowserClient() {

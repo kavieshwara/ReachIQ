@@ -63,9 +63,6 @@ export function resolveStaticAppUrl() {
 export function resolveBrowserAppUrl() {
   if (typeof window !== "undefined" && window.location?.origin) {
     const browserOrigin = normalizeUrl(window.location.origin);
-    if (browserOrigin && (legacyHostedAppUrls.has(browserOrigin) || isReachiqHostedDomain(browserOrigin))) {
-      return preferredHostedAppUrl;
-    }
     return browserOrigin || resolveStaticAppUrl();
   }
 
