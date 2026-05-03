@@ -50,7 +50,8 @@ function isReconnectableWhatsAppError(error) {
   return (
     message.includes("QR WhatsApp session is not connected.") ||
     message.includes("No active WhatsApp connection found.") ||
-    message.includes("ReachIQ could not restore the WhatsApp QR session in time.")
+    message.includes("ReachIQ could not restore the WhatsApp QR session in time.") ||
+    message.includes("ReachIQ detected a stale WhatsApp QR session.")
   );
 }
 

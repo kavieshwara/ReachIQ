@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import boomModule from "../../node_modules/@hapi/boom/lib/index.js";
 import * as baileysModule from "../../node_modules/@whiskeysockets/baileys/lib/index.js";
+import pinoModule from "../../node_modules/pino/pino.js";
 import QRCode from "../../node_modules/qrcode/lib/index.js";
 import { normalizeWhatsAppPhone, nowIso } from "../utils/helpers.js";
 import { supabaseAdmin } from "../utils/supabase.js";
@@ -22,10 +23,14 @@ const {
   fetchLatestBaileysVersion,
   useMultiFileAuthState
 } = baileysModule;
+const pino = pinoModule.default ?? pinoModule;
 
 const QR_EXPIRY_MS = 120000;
 const SESSION_ROOT = path.resolve(process.cwd(), process.env.WHATSAPP_QR_SESSION_DIR || ".whatsapp-sessions");
 const QR_SESSION_BACKUP_KEY_PREFIX = "qr_session_backup:";
+const QR_CRYPTO_FAILURE_WINDOW_MS = 60_000;
+const QR_CRYPTO_FAILURE_THRESHOLD = 6;
+const QR_SESSION_RECOVERY_MESSAGE = "ReachIQ detected a stale WhatsApp QR session. Refresh the QR session and reconnect WhatsApp.";
 
 const sessionSockets = new Map();
 const sessionState = new Map();
@@ -33,6 +38,99 @@ const sessionQrTimers = new Map();
 const qrSubscribers = new Map();
 const sessionRestorePromises = new Map();
 const sessionBackupTimers = new Map();
+const sessionCryptoFailures = new Map();
+const baseBaileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "error" });
+
+function isQrSessionCryptoError(errorLike) {
+  const message = String(errorLike?.message || errorLike || "");
+  return (
+    message.includes("No matching sessions found for message") ||
+    message.includes("Bad MAC") ||
+    message.includes("Invalid PreKey ID") ||
+    message.includes("failed to decrypt message")
+  );
+}
+
+function resetQrCryptoFailures(userId) {
+  sessionCryptoFailures.delete(userId);
+}
+
+async function invalidatePoisonedQrSession(userId, reason) {
+  const tracker = sessionCryptoFailures.get(userId) || {};
+  if (tracker.disconnecting) {
+    return;
+  }
+
+  sessionCryptoFailures.set(userId, {
+    ...tracker,
+    disconnecting: true
+  });
+
+  console.warn(`[ReachIQ][qr] invalidating poisoned WhatsApp QR session for ${userId}: ${reason}`);
+  await disconnectQRSession(userId, { clearAuth: true }).catch((error) => {
+    console.warn(`[ReachIQ][qr] failed to fully clear poisoned session for ${userId}: ${error.message}`);
+  });
+  resetQrCryptoFailures(userId);
+}
+
+function recordQrCryptoFailure(userId, details = "") {
+  const now = Date.now();
+  const tracker = sessionCryptoFailures.get(userId) || {
+    count: 0,
+    firstAt: now,
+    disconnecting: false
+  };
+
+  if (now - tracker.firstAt > QR_CRYPTO_FAILURE_WINDOW_MS) {
+    tracker.count = 0;
+    tracker.firstAt = now;
+  }
+
+  tracker.count += 1;
+  sessionCryptoFailures.set(userId, tracker);
+
+  if (tracker.disconnecting || tracker.count < QR_CRYPTO_FAILURE_THRESHOLD) {
+    return;
+  }
+
+  void invalidatePoisonedQrSession(userId, details || "repeated session decrypt failures");
+}
+
+function wrapBaileysLogger(userId, logger) {
+  const intercept = (level, value) => {
+    if (typeof value === "function") {
+      return value.bind(logger);
+    }
+
+    return (...args) => {
+      try {
+        const text = args.map((entry) => {
+          if (typeof entry === "string") return entry;
+          const message = entry?.err?.message || entry?.message || entry?.msg;
+          return message ? String(message) : "";
+        }).join(" ");
+
+        if (isQrSessionCryptoError(text)) {
+          recordQrCryptoFailure(userId, text);
+        }
+      } catch {
+        // Ignore logger interception failures and preserve original logging behavior.
+      }
+
+      return value.apply(logger, args);
+    };
+  };
+
+  return new Proxy(logger, {
+    get(target, prop, receiver) {
+      if (prop === "child") {
+        return (...args) => wrapBaileysLogger(userId, target.child(...args));
+      }
+
+      return intercept(prop, Reflect.get(target, prop, receiver));
+    }
+  });
+}
 
 function getSessionDir(userId) {
   return path.join(SESSION_ROOT, String(userId));
@@ -356,6 +454,7 @@ export function getQRSessionSnapshot(userId) {
 }
 
 export async function disconnectQRSession(userId, { clearAuth = true } = {}) {
+  resetQrCryptoFailures(userId);
   const socket = sessionSockets.get(userId);
   if (socket) {
     try {
@@ -479,7 +578,11 @@ async function buildSocket(userId, forceFresh = false) {
     auth: state,
     printQRInTerminal: false,
     syncFullHistory: false,
-    browser: ["ReachIQ", "Chrome", "1.0.0"]
+    browser: ["ReachIQ", "Chrome", "1.0.0"],
+    logger: wrapBaileysLogger(
+      userId,
+      baseBaileysLogger.child({ class: "baileys", userId })
+    )
   });
 
   sock.ev.on("creds.update", (...args) => {
@@ -537,6 +640,7 @@ async function buildSocket(userId, forceFresh = false) {
       }
 
       if (connection === "open") {
+        resetQrCryptoFailures(userId);
         const snapshotBeforeSave = getQRSessionSnapshot(userId);
         const socketUser = sock.user?.id || snapshotBeforeSave.socketUser || "";
         const phoneNumber = normalizeWhatsAppPhone(
@@ -573,6 +677,7 @@ async function buildSocket(userId, forceFresh = false) {
       }
 
       if (connection === "close") {
+        resetQrCryptoFailures(userId);
         const statusCode = lastDisconnect?.error instanceof Boom
           ? lastDisconnect.error.output?.statusCode
           : lastDisconnect?.error?.output?.statusCode;
@@ -742,8 +847,20 @@ async function resolveQrVideoPayload(videoUrl) {
 export async function sendQrTextMessage(userId, toPhone, messageText) {
   const sock = await ensureConnectedQrSocket(userId);
   const jid = `${normalizeWhatsAppPhone(toPhone)}@s.whatsapp.net`;
-  const result = await sock.sendMessage(jid, { text: messageText });
+  let result;
+  try {
+    result = await sock.sendMessage(jid, { text: messageText });
+  } catch (error) {
+    if (isQrSessionCryptoError(error)) {
+      await invalidatePoisonedQrSession(userId, error.message || "send text decrypt failure");
+      const reconnectError = new Error(QR_SESSION_RECOVERY_MESSAGE);
+      reconnectError.status = 409;
+      throw reconnectError;
+    }
+    throw error;
+  }
   const activeAt = nowIso();
+  resetQrCryptoFailures(userId);
   setSessionState(userId, { lastActiveAt: activeAt });
   await saveWhatsAppConnection({
     userId,
@@ -762,11 +879,23 @@ export async function sendQrVideoMessage(userId, toPhone, videoUrl, caption = ""
   const sock = await ensureConnectedQrSocket(userId);
   const jid = `${normalizeWhatsAppPhone(toPhone)}@s.whatsapp.net`;
   const videoPayload = await resolveQrVideoPayload(videoUrl);
-  const result = await sock.sendMessage(jid, {
-    video: videoPayload,
-    caption
-  });
+  let result;
+  try {
+    result = await sock.sendMessage(jid, {
+      video: videoPayload,
+      caption
+    });
+  } catch (error) {
+    if (isQrSessionCryptoError(error)) {
+      await invalidatePoisonedQrSession(userId, error.message || "send video decrypt failure");
+      const reconnectError = new Error(QR_SESSION_RECOVERY_MESSAGE);
+      reconnectError.status = 409;
+      throw reconnectError;
+    }
+    throw error;
+  }
   const activeAt = nowIso();
+  resetQrCryptoFailures(userId);
   setSessionState(userId, { lastActiveAt: activeAt });
   await saveWhatsAppConnection({
     userId,
