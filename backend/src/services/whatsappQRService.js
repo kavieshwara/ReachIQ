@@ -97,7 +97,10 @@ async function readStoredSessionBackup(userId) {
 
     return restored;
   } catch (error) {
-    console.error(`[ReachIQ][qr] could not parse stored session backup for ${userId}`, error);
+    console.warn(`[ReachIQ][qr] clearing invalid stored session backup for ${userId}: ${error.message}`);
+    await clearStoredSessionBackup(userId).catch((cleanupError) => {
+      console.warn(`[ReachIQ][qr] could not clear invalid stored session backup for ${userId}: ${cleanupError.message}`);
+    });
     return null;
   }
 }

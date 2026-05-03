@@ -2,7 +2,7 @@ import express from "express";
 import { supabaseAdmin } from "../utils/supabase.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getActiveWhatsAppConnection } from "../services/whatsappConnectionService.js";
-import { getQRSessionSnapshot, getStoredLinkedQrSessionInfo } from "../services/whatsappQRService.js";
+import { getQRSessionSnapshot, restoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
 
 const router = express.Router();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -10,12 +10,16 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 router.get("/me", requireAuth, async (req, res, next) => {
   try {
     const connection = await getActiveWhatsAppConnection(req.user.id);
-    const qrSnapshot = getQRSessionSnapshot(req.user.id);
-    const storedQr = await getStoredLinkedQrSessionInfo(req.user.id);
+    let qrSnapshot = getQRSessionSnapshot(req.user.id);
+    if (connection?.provider_type === "qr" && qrSnapshot.status !== "connected") {
+      const restoredQr = await restoreQRSessionIfAvailable(req.user.id).catch(() => null);
+      if (restoredQr) {
+        qrSnapshot = restoredQr;
+      }
+    }
     const whatsappConnected = Boolean(
       connection?.status === "connected" ||
-      qrSnapshot.status === "connected" ||
-      storedQr
+      qrSnapshot.status === "connected"
     );
 
     res.json({

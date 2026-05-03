@@ -45,6 +45,36 @@ function buildQrStatusFromSnapshot(snapshot) {
   };
 }
 
+async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
+  let snapshot = getQRSessionSnapshot(userId);
+
+  if (
+    snapshot.status === "connected" ||
+    snapshot.status === "connecting" ||
+    snapshot.status === "waiting_for_scan"
+  ) {
+    return snapshot;
+  }
+
+  const shouldAttemptRestore = Boolean(
+    activeConnection?.provider_type === "qr" ||
+    hasRecoverableQrConnection(allConnections)
+  );
+
+  if (!shouldAttemptRestore) {
+    return snapshot;
+  }
+
+  const restored = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  if (restored) {
+    snapshot = restored;
+  } else {
+    snapshot = getQRSessionSnapshot(userId);
+  }
+
+  return snapshot;
+}
+
 function hasRecoverableQrConnection(connections = []) {
   return connections.some((connection) =>
     connection.provider_type === "qr" &&
@@ -266,7 +296,7 @@ router.get("/status", async (req, res, next) => {
       getActiveWhatsAppConnection(req.user.id),
       getAllWhatsAppConnections(req.user.id)
     ]);
-    let qrSnapshot = getQRSessionSnapshot(req.user.id);
+    const qrSnapshot = await resolveLiveQrSnapshot(req.user.id, activeConnection, allConnections);
 
     if (
       qrSnapshot.status === "connected" ||
@@ -394,8 +424,8 @@ router.get("/qr/status", async (req, res, next) => {
     }
 
     const allConnections = await getAllWhatsAppConnections(req.user.id);
-    let snapshot = getQRSessionSnapshot(req.user.id);
     const connection = await getActiveWhatsAppConnection(req.user.id);
+    const snapshot = await resolveLiveQrSnapshot(req.user.id, connection, allConnections);
 
     if (
       snapshot.status === "connected" ||

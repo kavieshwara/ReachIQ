@@ -393,7 +393,9 @@ export async function releaseGeneratedWebsiteVideo(videoId, { removeStorage = fa
 export async function cleanupStaleVideoArtifacts() {
   const captureRoot = path.join(os.tmpdir(), "reachiq-video-capture");
   const maxArtifactAgeMs = Number(process.env.WEBSITE_VIDEO_TEMP_TTL_MS || 1000 * 60 * 30);
+  const maxFinalVideoAgeMs = Number(process.env.WEBSITE_VIDEO_FINAL_TTL_MS || 1000 * 60 * 60 * 6);
   const cutoff = Date.now() - maxArtifactAgeMs;
+  const finalCutoff = Date.now() - maxFinalVideoAgeMs;
 
   const cleanupEntries = async (rootDir) => {
     let entries = [];
@@ -418,7 +420,35 @@ export async function cleanupStaleVideoArtifacts() {
     );
   };
 
+  const cleanupFinalVideos = async (rootDir) => {
+    let entries = [];
+    try {
+      entries = await fs.readdir(rootDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        if (entry.isDirectory() || !entry.name.toLowerCase().endsWith(".mp4")) {
+          return;
+        }
+
+        const targetPath = path.join(rootDir, entry.name);
+        try {
+          const stats = await fs.stat(targetPath);
+          if (stats.mtimeMs < finalCutoff) {
+            await fs.rm(targetPath, { force: true }).catch(() => null);
+          }
+        } catch {
+          // Ignore cleanup races and continue.
+        }
+      })
+    );
+  };
+
   await cleanupEntries(captureRoot);
+  await cleanupFinalVideos(VIDEO_ROOT);
 }
 
 function getStorageObjectPath(videoId) {
