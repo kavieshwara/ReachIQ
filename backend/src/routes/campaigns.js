@@ -340,12 +340,31 @@ router.post("/:id/repair-assets", async (req, res, next) => {
 
     const { campaignLeadId = null, website_template_id = null } = req.body || {};
 
-    const { data: campaign, error: campaignError } = await supabaseAdmin
+    let { data: campaign, error: campaignError } = await supabaseAdmin
       .from("campaigns")
       .select("id, user_id, name, website_template_id, auto_generate_assets, require_video_assets")
       .eq("id", req.params.id)
       .eq("user_id", req.user.id)
       .single();
+
+    if (campaignError && isMissingCampaignAutomationSchema(campaignError)) {
+      const fallbackCampaignLookup = await supabaseAdmin
+        .from("campaigns")
+        .select("id, user_id, name")
+        .eq("id", req.params.id)
+        .eq("user_id", req.user.id)
+        .single();
+
+      campaign = fallbackCampaignLookup.data
+        ? {
+            ...fallbackCampaignLookup.data,
+            website_template_id: null,
+            auto_generate_assets: null,
+            require_video_assets: null
+          }
+        : null;
+      campaignError = fallbackCampaignLookup.error;
+    }
 
     if (campaignError) throw campaignError;
 
