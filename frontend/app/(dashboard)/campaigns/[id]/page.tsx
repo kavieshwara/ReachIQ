@@ -66,12 +66,18 @@ function formatPreparationStatus(kind: "website" | "message" | "video", value?: 
   return value;
 }
 
-function getLeadStatusDisplay(item: any, preparation: any) {
+function getLeadStatusDisplay(item: any, preparation: any, hasLiveWhatsAppConnection: boolean) {
   const currentStatus = String(item?.status || "pending").trim() || "pending";
   const sendStatus = String(preparation?.send_status || "").trim();
   const generationError = String(preparation?.generation_error || "").trim();
 
   if (isReconnectableWhatsAppError(item?.error_message) || isReconnectableWhatsAppError(generationError)) {
+    if (hasLiveWhatsAppConnection && sendStatus === "ready") {
+      return "ready";
+    }
+    if (hasLiveWhatsAppConnection && sendStatus === "pending") {
+      return "pending";
+    }
     return "awaiting_whatsapp";
   }
 
@@ -124,12 +130,15 @@ function getDraftAssetHint(kind: "website" | "message" | "video", preparation: a
   return "Message draft not ready yet";
 }
 
-function getPreparationErrorDisplay(item: any, preparation: any) {
+function getPreparationErrorDisplay(item: any, preparation: any, hasLiveWhatsAppConnection: boolean) {
   if (item?.error_message) {
     if (/request failed with status code 503/i.test(String(item.error_message))) {
       return "A hosted ReachIQ service was temporarily unavailable while this lead was processing. Click Launch again to retry this lead on the live backend.";
     }
     if (isReconnectableWhatsAppError(item.error_message)) {
+      if (hasLiveWhatsAppConnection) {
+        return "WhatsApp is connected again. Click Launch once to resume sending this prepared lead.";
+      }
       return "Reconnect WhatsApp in Connection Center, then click Launch again.";
     }
     return item.error_message;
@@ -151,6 +160,9 @@ function getPreparationErrorDisplay(item: any, preparation: any) {
   }
 
   if (isReconnectableWhatsAppError(generationError)) {
+    if (hasLiveWhatsAppConnection) {
+      return "WhatsApp is connected again. Click Launch once to resume sending this prepared lead.";
+    }
     return "Reconnect WhatsApp in Connection Center, then click Launch again.";
   }
 
@@ -233,6 +245,8 @@ export default function CampaignDetailPage() {
     return isReconnectableWhatsAppError(item?.error_message) || isReconnectableWhatsAppError(preparation?.generation_error);
   });
   const hasLiveWhatsAppConnection = Boolean(whatsappStatus?.connected);
+  const shouldShowReconnectBanner =
+    campaign.status === "awaiting_whatsapp" || (!hasLiveWhatsAppConnection && hasReconnectableWhatsAppError);
   const isLegacyHostedFailureCampaign =
     !campaign.automation_config &&
     !(campaign.outreach_preparations || []).length &&
@@ -343,7 +357,7 @@ export default function CampaignDetailPage() {
             <p className="text-xs text-textMuted">{refreshing ? "Refreshing..." : "Auto-refresh every 5s while active"}</p>
           </div>
           <p className="text-sm leading-6 text-textSecondary">{statusHelper}</p>
-          {campaign.status === "awaiting_whatsapp" || hasReconnectableWhatsAppError ? (
+          {shouldShowReconnectBanner ? (
             <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
               {hasLiveWhatsAppConnection ? (
                 <p>
@@ -491,7 +505,7 @@ export default function CampaignDetailPage() {
                   return (
                     <tr key={item.id} className="border-b border-border/60">
                       <td className="px-3 py-2 text-textPrimary">{item.leads?.business_name}</td>
-                      <td className="px-3 py-2 text-textSecondary">{getLeadStatusDisplay(item, preparation)}</td>
+                      <td className="px-3 py-2 text-textSecondary">{getLeadStatusDisplay(item, preparation, hasLiveWhatsAppConnection)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatPreparationStatus("website", preparation?.website_status)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatPreparationStatus("message", preparation?.message_status)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatPreparationStatus("video", preparation?.video_status)}</td>
@@ -534,7 +548,7 @@ export default function CampaignDetailPage() {
                       <td className="px-3 py-2 text-textSecondary">{formatDate(item.sent_at)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatDate(item.delivered_at)}</td>
                       <td className="px-3 py-2 text-textSecondary">{formatDate(item.read_at)}</td>
-                      <td className="px-3 py-2 text-danger">{getPreparationErrorDisplay(item, preparation)}</td>
+                      <td className="px-3 py-2 text-danger">{getPreparationErrorDisplay(item, preparation, hasLiveWhatsAppConnection)}</td>
                     </tr>
                   );
                 })}

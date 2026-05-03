@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { supabaseAdmin } from "../utils/supabase.js";
 import { ensureStarterWebsiteTemplates } from "../data/starterWebsiteTemplates.js";
 
-const FALLBACK_PRODUCTION_PREVIEW_BASE_URL = "https://reachiq-api.onrender.com";
+const FALLBACK_PRODUCTION_PREVIEW_BASE_URL = "https://3.111.184.108.sslip.io";
 const LEGACY_PREVIEW_HOST_PATTERNS = [
   /reachiq-hqzc\.onrender\.com/i,
   /localhost/i,

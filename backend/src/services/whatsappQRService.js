@@ -72,7 +72,14 @@ async function invalidatePoisonedQrSession(userId, reason) {
   });
 
   console.warn(`[ReachIQ][qr] invalidating poisoned WhatsApp QR session for ${userId}: ${reason}`);
-  await disconnectQRSession(userId, { clearAuth: true }).catch((error) => {
+  try {
+    await persistSessionBackupWithRetry(userId, { attempts: 3, delayMs: 600 }).catch(() => false);
+  } catch {
+    // Best-effort backup only.
+  }
+
+  const canSafelyClearAuth = await hasStoredSessionBackup(userId).catch(() => false);
+  await disconnectQRSession(userId, { clearAuth: canSafelyClearAuth }).catch((error) => {
     console.warn(`[ReachIQ][qr] failed to fully clear poisoned session for ${userId}: ${error.message}`);
   });
   resetQrCryptoFailures(userId);
@@ -207,6 +214,11 @@ async function readStoredSessionBackup(userId) {
     });
     return null;
   }
+}
+
+async function hasStoredSessionBackup(userId) {
+  const backup = await readStoredSessionBackup(userId);
+  return Boolean(backup?.files && Object.keys(backup.files).length);
 }
 
 async function writeStoredSessionBackup(userId, payload) {
@@ -483,6 +495,24 @@ export async function getStoredLinkedQrSessionInfo(userId) {
   }
 }
 
+export function hasActiveQrSocket(userId) {
+  return sessionSockets.has(userId);
+}
+
+export function hasLiveQrSocket(userId) {
+  const socket = sessionSockets.get(userId);
+  const snapshot = getQRSessionSnapshot(userId);
+  return Boolean(socket && snapshot.status === "connected" && socket.user?.id);
+}
+
+export async function hasRecoverableQrAuthState(userId) {
+  if (await hasSavedSessionFiles(userId)) {
+    return true;
+  }
+
+  return hasStoredSessionBackup(userId).catch(() => false);
+}
+
 export function getQRSessionSnapshot(userId) {
   return sessionState.get(userId) || {
     userId,
@@ -716,10 +746,24 @@ async function buildSocket(userId, forceFresh = false) {
           socketUser: socketUser || snapshotBeforeSave.socketUser || null,
           lastActiveAt: activeAt
         });
+        let durableBackupPersisted = false;
+        try {
+          durableBackupPersisted = await persistSessionBackupWithRetry(userId, {
+            attempts: 8,
+            delayMs: 1000
+          });
+        } catch (error) {
+          console.error(`[ReachIQ][qr] failed to persist durable WhatsApp backup for ${userId}`, error);
+        }
+        if (!durableBackupPersisted) {
+          console.warn(`[ReachIQ][qr] durable WhatsApp backup not yet confirmed for ${userId}; keeping retry backup scheduled`);
+        }
         await resumeAwaitingWhatsAppCampaigns(userId, "qr_reconnected").catch((error) => {
           console.warn(`[ReachIQ][qr] could not resume awaiting campaigns for ${userId}: ${error.message}`);
         });
-        ensureQrSessionBackup(userId);
+        if (!durableBackupPersisted) {
+          ensureQrSessionBackup(userId);
+        }
         scheduleSessionBackup(userId);
         const snapshot = getQRSessionSnapshot(userId);
         emitToSubscribers(userId, {

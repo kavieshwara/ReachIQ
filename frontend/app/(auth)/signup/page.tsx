@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { FullPageAuthLoader } from "@/components/auth/FullPageAuthLoader";
 import { api } from "@/lib/api";
-import { buildAuthCallbackUrl, preferredHostedAppUrl, resolveBrowserAppUrl } from "@/lib/public-url";
+import { buildAuthCallbackUrl, canonicalizeAppUrl, preferredHostedAppUrl, resolveStaticAppUrl } from "@/lib/public-url";
 import { isDemoMode, isSupabaseConfigured, supabase, supabaseConfigMessage } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -68,8 +68,8 @@ function SignupPageContent() {
       return;
     }
 
-    const currentOrigin = window.location.origin.replace(/\/$/, "");
-    const canonicalOrigin = resolveBrowserAppUrl();
+    const currentOrigin = canonicalizeAppUrl(window.location.origin);
+    const canonicalOrigin = resolveStaticAppUrl();
     const isHostedMismatch = currentOrigin !== canonicalOrigin && /vercel\.app$/i.test(window.location.hostname);
 
     if (isHostedMismatch) {

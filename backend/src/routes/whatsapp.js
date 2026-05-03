@@ -18,6 +18,9 @@ import {
   addQRSubscriber,
   disconnectQRSession,
   ensureQrSessionBackup,
+  hasActiveQrSocket,
+  hasLiveQrSocket,
+  hasRecoverableQrAuthState,
   getQRSessionSnapshot,
   getStoredLinkedQrSessionInfo,
   removeQRSubscriber,
@@ -49,22 +52,32 @@ function buildQrStatusFromSnapshot(snapshot) {
 
 async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
   let snapshot = getQRSessionSnapshot(userId);
+  const hasConnectedSocket = hasLiveQrSocket(userId);
+  const hasSocket = hasActiveQrSocket(userId);
 
-  if (
-    snapshot.status === "connected" ||
-    snapshot.status === "connecting" ||
-    snapshot.status === "waiting_for_scan"
-  ) {
+  if (snapshot.status === "connected" && hasConnectedSocket) {
     return snapshot;
   }
 
+  if ((snapshot.status === "connecting" || snapshot.status === "waiting_for_scan") && hasSocket) {
+    return snapshot;
+  }
+
+  const hasRecoverableAuth = await hasRecoverableQrAuthState(userId).catch(() => false);
+
   const shouldAttemptRestore = Boolean(
     activeConnection?.provider_type === "qr" ||
-    hasRecoverableQrConnection(allConnections)
+    hasRecoverableQrConnection(allConnections) ||
+    hasRecoverableAuth
   );
 
   if (!shouldAttemptRestore) {
-    return snapshot;
+    return {
+      ...snapshot,
+      status: "disconnected",
+      qrImage: null,
+      expiresAt: null
+    };
   }
 
   const restored = await restoreQRSessionIfAvailable(userId).catch(() => null);
@@ -265,7 +278,11 @@ router.get("/qr-stream", async (req, res) => {
     });
 
     addQRSubscriber(userId, res);
-    const snapshot = getQRSessionSnapshot(userId);
+    const [activeConnection, allConnections] = await Promise.all([
+      getActiveWhatsAppConnection(userId),
+      getAllWhatsAppConnections(userId)
+    ]);
+    const snapshot = await resolveLiveQrSnapshot(userId, activeConnection, allConnections);
     res.write(`event: snapshot\ndata: ${JSON.stringify({
       type: "snapshot",
       ...snapshot

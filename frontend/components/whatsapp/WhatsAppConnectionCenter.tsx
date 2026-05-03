@@ -69,7 +69,7 @@ function formatConnectionStatus(status: ConnectionStatus) {
 }
 
 function formatTimestamp(value?: string | null) {
-  if (!value) return "Just now";
+  if (!value) return "Not available";
   try {
     return new Intl.DateTimeFormat(undefined, {
       dateStyle: "medium",
@@ -102,24 +102,30 @@ export function WhatsAppConnectionCenter() {
   const metaDisabled = activeProvider === "qr";
 
   const loadStatus = useCallback(async () => {
-    const response = await api.get("/api/whatsapp/status");
-    const data = response.data as StatusPayload;
-    setStatus(data);
+    try {
+      const response = await api.get("/api/whatsapp/status");
+      const data = response.data as StatusPayload;
+      setStatus(data);
 
-    if (data.providerType === "qr") {
-      const nextStatus = data.status || "disconnected";
-      setQrState({
-        status: nextStatus,
-        qrImage: nextStatus === "connected" ? null : (data as any).qrImage ?? null,
-        expiresAt: nextStatus === "connected" ? null : (data as any).expiresAt ?? null,
-        phoneNumber: data.phoneNumber ?? null,
-        lastActiveAt: data.lastActiveAt ?? null
-      });
-      return;
-    }
+      if (data.providerType === "qr") {
+        const nextStatus = data.status || "disconnected";
+        setQrState({
+          status: nextStatus,
+          qrImage: nextStatus === "connected" ? null : (data as any).qrImage ?? null,
+          expiresAt: nextStatus === "connected" ? null : (data as any).expiresAt ?? null,
+          phoneNumber: data.phoneNumber ?? null,
+          lastActiveAt: data.lastActiveAt ?? null
+        });
+        return;
+      }
 
-    if (data.providerType === "meta" || !data.connected) {
+      if (data.providerType === "meta" || !data.connected) {
+        setQrState(initialQrState);
+      }
+    } catch (error) {
+      setStatus((current) => current ? { ...current, connected: false, status: "disconnected" } : null);
       setQrState(initialQrState);
+      throw error;
     }
   }, []);
 
@@ -185,8 +191,8 @@ export function WhatsAppConnectionCenter() {
       setQrState((current) => ({
         ...current,
         status: payload.status || current.status,
-        qrImage: payload.qrImage || current.qrImage,
-        expiresAt: payload.expiresAt || current.expiresAt,
+        qrImage: payload.status === "connected" ? null : (payload.qrImage || current.qrImage),
+        expiresAt: payload.status === "connected" ? null : (payload.expiresAt || current.expiresAt),
         phoneNumber: payload.phoneNumber || current.phoneNumber,
         lastActiveAt: payload.lastActiveAt || current.lastActiveAt
       }));
@@ -233,7 +239,11 @@ export function WhatsAppConnectionCenter() {
     });
 
     source.onerror = () => {
+      if (streamRef.current === source) {
+        streamRef.current = null;
+      }
       source.close();
+      void loadStatus().catch(() => null);
     };
   }, [loadStatus]);
 
@@ -328,6 +338,7 @@ export function WhatsAppConnectionCenter() {
         verifiedName: response.data?.verifiedName
       });
       streamRef.current?.close();
+      streamRef.current = null;
       setQrState(initialQrState);
       toast.success("Meta WhatsApp connected");
       await loadStatus();
@@ -347,6 +358,7 @@ export function WhatsAppConnectionCenter() {
       await api.post(endpoint);
       if (providerType === "qr") {
         streamRef.current?.close();
+        streamRef.current = null;
         setQrState(initialQrState);
       }
       toast.success("WhatsApp connection removed");
@@ -358,7 +370,7 @@ export function WhatsAppConnectionCenter() {
     }
   }, [loadStatus]);
 
-  const qrStatusLabel = formatConnectionStatus(qrState.status);
+  const qrStatusLabel = formatConnectionStatus(status?.providerType === "qr" ? status.status : qrState.status);
   const metaStatusLabel = activeProvider === "meta" && status?.connected ? "Connected" : "Not connected";
 
   const summaryBadge = useMemo(() => {
@@ -388,10 +400,17 @@ export function WhatsAppConnectionCenter() {
             <p className="font-medium text-textPrimary">Only one connection can be active per workspace.</p>
             <p className="mt-1">If Quick Connect is active, Meta is locked until you disconnect. If Meta is active, Quick Connect is locked until you disconnect.</p>
           </div>
-          <div className="flex w-full items-center justify-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-2 text-center text-primary md:w-auto md:justify-start">
-            <Smartphone className="h-4 w-4" />
-            <span>Ready for campaigns, follow-ups, and automated sends</span>
-          </div>
+          {status?.connected ? (
+            <div className="flex w-full items-center justify-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-2 text-center text-primary md:w-auto md:justify-start">
+              <Smartphone className="h-4 w-4" />
+              <span>Ready for campaigns, follow-ups, and automated sends</span>
+            </div>
+          ) : (
+            <div className="flex w-full items-center justify-center gap-2 rounded-full border border-warning/20 bg-warning/10 px-4 py-2 text-center text-warning md:w-auto md:justify-start">
+              <Smartphone className="h-4 w-4" />
+              <span>Connect WhatsApp to start sends and follow-ups</span>
+            </div>
+          )}
         </CardContent>
       </Card>
 

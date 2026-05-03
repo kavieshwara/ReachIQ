@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs";
 import type { EmailOtpType } from "@supabase/supabase-js";
-import { resolveStaticAppUrl } from "@/lib/public-url";
+import { canonicalizeAppUrl, resolveStaticAppUrl } from "@/lib/public-url";
 
 function sanitizeNextPath(value: string | null) {
   if (!value || !value.startsWith("/")) {
@@ -13,7 +13,7 @@ function sanitizeNextPath(value: string | null) {
 }
 
 function buildLoginRedirect(requestUrl: URL, message: string, nextPath: string) {
-  const redirectBase = requestUrl.origin || resolveStaticAppUrl();
+  const redirectBase = canonicalizeAppUrl(requestUrl.origin) || resolveStaticAppUrl();
   const redirectUrl = new URL("/login", `${redirectBase}/`);
   redirectUrl.searchParams.set("authError", message);
   if (nextPath.startsWith("/")) {
@@ -68,6 +68,6 @@ export async function GET(request: Request) {
     );
   }
 
-  const redirectBase = requestUrl.origin || resolveStaticAppUrl();
+  const redirectBase = canonicalizeAppUrl(requestUrl.origin) || resolveStaticAppUrl();
   return NextResponse.redirect(new URL(nextPath, `${redirectBase}/`), 307);
 }

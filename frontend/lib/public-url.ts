@@ -16,16 +16,25 @@ export const legacyHostedAppUrls = new Set([
   "https://reachiq-kavieshwaras-projects.vercel.app"
 ]);
 
+export function canonicalizeAppUrl(value?: string | null) {
+  const normalizedValue = normalizeUrl(value);
+  if (!normalizedValue) {
+    return null;
+  }
+
+  if (legacyHostedAppUrls.has(normalizedValue) || isReachiqHostedDomain(normalizedValue)) {
+    return preferredHostedAppUrl;
+  }
+
+  return normalizedValue;
+}
+
 function canonicalizeHostedAppUrl(value: string | null) {
   if (!value) {
     return null;
   }
 
-  if (legacyHostedAppUrls.has(value)) {
-    return preferredHostedAppUrl;
-  }
-
-  return value;
+  return canonicalizeAppUrl(value);
 }
 
 function isReachiqHostedDomain(value: string | null) {
@@ -62,7 +71,7 @@ export function resolveStaticAppUrl() {
 
 export function resolveBrowserAppUrl() {
   if (typeof window !== "undefined" && window.location?.origin) {
-    const browserOrigin = normalizeUrl(window.location.origin);
+    const browserOrigin = canonicalizeAppUrl(window.location.origin);
     return browserOrigin || resolveStaticAppUrl();
   }
 
@@ -74,7 +83,7 @@ export function buildBrowserAppUrl(pathname = "/") {
 }
 
 export function buildAuthCallbackUrl(nextPath = "/dashboard") {
-  const callbackUrl = new URL("/auth/callback", `${resolveBrowserAppUrl()}/`);
+  const callbackUrl = new URL("/auth/callback", `${resolveStaticAppUrl()}/`);
 
   if (nextPath && nextPath.startsWith("/")) {
     callbackUrl.searchParams.set("next", nextPath);
