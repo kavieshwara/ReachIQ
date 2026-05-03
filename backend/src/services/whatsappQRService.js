@@ -252,11 +252,11 @@ async function persistSessionBackup(userId) {
   try {
     files = await listSessionFilesRecursive(sessionDir);
   } catch {
-    return;
+    return false;
   }
 
   if (!files.length) {
-    return;
+    return false;
   }
 
   const payload = {
@@ -272,6 +272,40 @@ async function persistSessionBackup(userId) {
   }
 
   await writeStoredSessionBackup(userId, payload);
+  return true;
+}
+
+async function persistSessionBackupWithRetry(
+  userId,
+  { attempts = 6, delayMs = 1200 } = {}
+) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const saved = await persistSessionBackup(userId);
+      if (saved) {
+        return true;
+      }
+    } catch (error) {
+      if (attempt === attempts) {
+        throw error;
+      }
+      console.warn(
+        `[ReachIQ][qr] retrying WhatsApp session backup for ${userId} after attempt ${attempt}: ${error.message}`
+      );
+    }
+
+    if (attempt < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  return false;
+}
+
+export function ensureQrSessionBackup(userId) {
+  void persistSessionBackupWithRetry(userId).catch((error) => {
+    console.error(`[ReachIQ][qr] failed to persist WhatsApp session backup for ${userId}`, error);
+  });
 }
 
 function scheduleSessionBackup(userId) {
@@ -685,6 +719,7 @@ async function buildSocket(userId, forceFresh = false) {
         await resumeAwaitingWhatsAppCampaigns(userId, "qr_reconnected").catch((error) => {
           console.warn(`[ReachIQ][qr] could not resume awaiting campaigns for ${userId}: ${error.message}`);
         });
+        ensureQrSessionBackup(userId);
         scheduleSessionBackup(userId);
         const snapshot = getQRSessionSnapshot(userId);
         emitToSubscribers(userId, {
@@ -894,6 +929,8 @@ export async function sendQrTextMessage(userId, toPhone, messageText) {
     },
     lastActiveAt: activeAt
   });
+  ensureQrSessionBackup(userId);
+  scheduleSessionBackup(userId);
   return result;
 }
 
@@ -929,5 +966,7 @@ export async function sendQrVideoMessage(userId, toPhone, videoUrl, caption = ""
     },
     lastActiveAt: activeAt
   });
+  ensureQrSessionBackup(userId);
+  scheduleSessionBackup(userId);
   return result;
 }

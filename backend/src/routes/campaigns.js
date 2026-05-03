@@ -297,14 +297,53 @@ router.post("/:id/launch", async (req, res, next) => {
       return res.json({ success: true, campaign: launchDemoCampaign(req.params.id) });
     }
 
-    await supabaseAdmin
+    const { data: failedLeadRows, error: failedLeadLookupError } = await supabaseAdmin
       .from("campaign_leads")
-      .update({
-        status: "pending",
-        error_message: null
-      })
+      .select("id, lead_id")
       .eq("campaign_id", req.params.id)
       .eq("status", "failed");
+
+    if (failedLeadLookupError) throw failedLeadLookupError;
+
+    const failedLeadIds = (failedLeadRows || []).map((item) => item.id).filter(Boolean);
+
+    if (failedLeadIds.length) {
+      const { error: resetLeadError } = await supabaseAdmin
+        .from("campaign_leads")
+        .update({
+          status: "pending",
+          error_message: null
+        })
+        .in("id", failedLeadIds);
+
+      if (resetLeadError) throw resetLeadError;
+
+      const sendResetPayload = {
+        send_status: "pending",
+        generation_error: null,
+        updated_at: nowIso()
+      };
+
+      const { error: resetPreparationError } = await supabaseAdmin
+        .from("outreach_preparations")
+        .update(sendResetPayload)
+        .in("campaign_lead_id", failedLeadIds);
+
+      if (resetPreparationError) {
+        if (isMissingOutreachPreparationsTable(resetPreparationError)) {
+          for (const leadRow of failedLeadRows) {
+            await upsertCompatLeadPreparation(req.params.id, leadRow.id, {
+              user_id: req.user.id,
+              campaign_id: req.params.id,
+              lead_id: leadRow.lead_id,
+              ...sendResetPayload
+            });
+          }
+        } else {
+          throw resetPreparationError;
+        }
+      }
+    }
 
     const { data, error } = await supabaseAdmin
       .from("campaigns")

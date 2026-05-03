@@ -17,6 +17,7 @@ import {
 import {
   addQRSubscriber,
   disconnectQRSession,
+  ensureQrSessionBackup,
   getQRSessionSnapshot,
   getStoredLinkedQrSessionInfo,
   removeQRSubscriber,
@@ -309,6 +310,7 @@ router.get("/status", async (req, res, next) => {
       qrSnapshot.status === "waiting_for_scan"
     ) {
       if (qrSnapshot.status === "connected") {
+        ensureQrSessionBackup(req.user.id);
         await resumeAwaitingWhatsAppCampaigns(req.user.id, "qr_status_connected").catch((error) => {
           console.warn(`[ReachIQ][qr] could not resume awaiting campaigns from status for ${req.user.id}: ${error.message}`);
         });
