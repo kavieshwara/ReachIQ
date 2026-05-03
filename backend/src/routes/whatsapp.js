@@ -53,26 +53,25 @@ function hasRecoverableQrConnection(connections = []) {
   );
 }
 
-async function buildStoredQrRecoveredStatus(userId, connections = []) {
+async function buildStoredQrRecoverableStatus(userId, connections = []) {
   const stored = await getStoredLinkedQrSessionInfo(userId);
   if (!stored) {
     return null;
   }
 
-  try {
-    const snapshot = await restoreQRSessionIfAvailable(userId);
-    if (snapshot?.status === "connected" || snapshot?.status === "connecting" || snapshot?.status === "waiting_for_scan") {
-      return {
-        ...buildQrStatusFromSnapshot(snapshot),
-        metaVerified: false,
-        connections: connections.map(serializeConnectionForClient)
-      };
-    }
-  } catch (error) {
-    console.warn(`[ReachIQ][qr] could not restore QR connection for ${userId}: ${error.message}`);
-  }
-
-  return null;
+  return {
+    connected: false,
+    providerType: "qr",
+    status: "disconnected",
+    phoneNumber: stored.phoneNumber || null,
+    lastActiveAt: null,
+    sessionData: stored.socketUser ? { socketUser: stored.socketUser } : {},
+    qrImage: null,
+    expiresAt: null,
+    metaVerified: false,
+    recoverable: true,
+    connections: connections.map(serializeConnectionForClient)
+  };
 }
 
 async function buildStaleQrDisconnectedStatus(userId, connection, connections = []) {
@@ -281,7 +280,7 @@ router.get("/status", async (req, res, next) => {
       });
     }
 
-    const storedQr = await buildStoredQrRecoveredStatus(req.user.id, allConnections);
+    const storedQr = await buildStoredQrRecoverableStatus(req.user.id, allConnections);
     if (storedQr) {
       return res.json(storedQr);
     }
@@ -406,7 +405,7 @@ router.get("/qr/status", async (req, res, next) => {
       return res.json(buildQrStatusFromSnapshot(snapshot));
     }
 
-    const restored = await buildStoredQrRecoveredStatus(req.user.id, allConnections);
+    const restored = await buildStoredQrRecoverableStatus(req.user.id, allConnections);
     if (restored) {
       return res.json(restored);
     }

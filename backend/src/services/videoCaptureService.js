@@ -23,14 +23,38 @@ const BUNDLED_PLAYWRIGHT_INDEX = process.env.PLAYWRIGHT_PACKAGE_PATH
 const CAPTURE_WIDTH = 1280;
 const CAPTURE_HEIGHT = 720;
 const WEBSITE_VIDEO_ENABLED = String(process.env.ENABLE_WEBSITE_VIDEO || "true").toLowerCase() !== "false";
+const MAX_CONCURRENT_CAPTURES = Math.max(1, Number(process.env.MAX_VIDEO_CAPTURE_CONCURRENCY || 1));
 const VIDEO_STORAGE_BUCKET = process.env.WEBSITE_VIDEO_BUCKET || "platform-assets";
 const VIDEO_STORAGE_PREFIX = (process.env.WEBSITE_VIDEO_STORAGE_PREFIX || "generated-videos").replace(/^\/+|\/+$/g, "");
 const CHROME_CANDIDATES = [
   process.env.PLAYWRIGHT_CHROME_EXECUTABLE_PATH,
 ].filter(Boolean);
+const inFlightCaptures = new Map();
+let activeCaptures = 0;
+const captureWaitQueue = [];
 
 async function ensureVideoRoot() {
   await fs.mkdir(VIDEO_ROOT, { recursive: true });
+}
+
+async function acquireCaptureSlot() {
+  if (activeCaptures < MAX_CONCURRENT_CAPTURES) {
+    activeCaptures += 1;
+    return;
+  }
+
+  await new Promise((resolve) => {
+    captureWaitQueue.push(resolve);
+  });
+  activeCaptures += 1;
+}
+
+function releaseCaptureSlot() {
+  activeCaptures = Math.max(0, activeCaptures - 1);
+  const next = captureWaitQueue.shift();
+  if (next) {
+    next();
+  }
 }
 
 async function fileExists(targetPath) {
@@ -349,6 +373,54 @@ export function isWebsiteVideoEnabled() {
   return WEBSITE_VIDEO_ENABLED;
 }
 
+export async function releaseGeneratedWebsiteVideo(videoId, { removeStorage = false } = {}) {
+  const finalVideoPath = getGeneratedWebsiteVideoFilePath(videoId);
+  await fs.rm(finalVideoPath, { force: true }).catch(() => null);
+
+  if (!removeStorage) {
+    return;
+  }
+
+  const { error } = await supabaseAdmin.storage
+    .from(VIDEO_STORAGE_BUCKET)
+    .remove([getStorageObjectPath(videoId)]);
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function cleanupStaleVideoArtifacts() {
+  const captureRoot = path.join(os.tmpdir(), "reachiq-video-capture");
+  const maxArtifactAgeMs = Number(process.env.WEBSITE_VIDEO_TEMP_TTL_MS || 1000 * 60 * 30);
+  const cutoff = Date.now() - maxArtifactAgeMs;
+
+  const cleanupEntries = async (rootDir) => {
+    let entries = [];
+    try {
+      entries = await fs.readdir(rootDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        const targetPath = path.join(rootDir, entry.name);
+        try {
+          const stats = await fs.stat(targetPath);
+          if (stats.mtimeMs < cutoff) {
+            await fs.rm(targetPath, { recursive: entry.isDirectory(), force: true }).catch(() => null);
+          }
+        } catch {
+          // Ignore cleanup races and continue.
+        }
+      })
+    );
+  };
+
+  await cleanupEntries(captureRoot);
+}
+
 function getStorageObjectPath(videoId) {
   return `${VIDEO_STORAGE_PREFIX}/${videoId}.mp4`;
 }
@@ -477,54 +549,75 @@ export async function captureGeneratedWebsiteVideo({ videoId, previewUrl, previe
     // continue and create the file
   }
 
-  const tempVideoDir = buildVideoTempDir(videoId);
-  await fs.rm(tempVideoDir, { recursive: true, force: true }).catch(() => null);
-  await fs.mkdir(tempVideoDir, { recursive: true });
+  const existingCapture = inFlightCaptures.get(videoId);
+  if (existingCapture) {
+    return existingCapture;
+  }
 
-  const chromium = await loadChromium();
-  const executablePath = await resolveChromeExecutablePath();
-  const browser = await chromium.launch({
-    headless: true,
-    executablePath: executablePath || undefined
-  });
+  const capturePromise = (async () => {
+    await acquireCaptureSlot();
+    const tempVideoDir = buildVideoTempDir(videoId);
+    let browser = null;
+    let webmPath = "";
 
-  let webmPath = "";
+    try {
+      await fs.rm(tempVideoDir, { recursive: true, force: true }).catch(() => null);
+      await fs.mkdir(tempVideoDir, { recursive: true });
+
+      const chromium = await loadChromium();
+      const executablePath = await resolveChromeExecutablePath();
+      browser = await chromium.launch({
+        headless: true,
+        executablePath: executablePath || undefined
+      });
+
+      const context = await browser.newContext({
+        viewport: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
+        screen: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
+        deviceScaleFactor: 1,
+        recordVideo: {
+          dir: tempVideoDir,
+          size: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT }
+        }
+      });
+
+      const page = await context.newPage();
+      const recordedVideo = page.video();
+      await openPreviewPage(page, previewUrl, previewHtml);
+      await animatePreview(page);
+
+      await page.close();
+      await context.close();
+      webmPath = await recordedVideo.path();
+
+      if (!webmPath) {
+        throw new Error("ReachIQ recorded the website preview, but could not find the video file.");
+      }
+
+      await convertWebmToMp4(webmPath, finalVideoPath);
+      await uploadVideoToStorage(videoId, finalVideoPath).catch((error) => {
+        console.error("[ReachIQ][video] Failed to upload generated video to storage", error);
+      });
+
+      return {
+        videoPath: finalVideoPath,
+        videoUrl: buildGeneratedWebsiteVideoUrl(videoId)
+      };
+    } finally {
+      await browser?.close().catch(() => null);
+      await fs.rm(tempVideoDir, { recursive: true, force: true }).catch(() => null);
+      releaseCaptureSlot();
+    }
+  })();
+
+  inFlightCaptures.set(videoId, capturePromise);
 
   try {
-    const context = await browser.newContext({
-      viewport: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
-      screen: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT },
-      deviceScaleFactor: 1,
-      recordVideo: {
-        dir: tempVideoDir,
-        size: { width: CAPTURE_WIDTH, height: CAPTURE_HEIGHT }
-      }
-    });
-
-    const page = await context.newPage();
-    const recordedVideo = page.video();
-    await openPreviewPage(page, previewUrl, previewHtml);
-    await animatePreview(page);
-
-    await page.close();
-    await context.close();
-    webmPath = await recordedVideo.path();
+    return await capturePromise;
+  } catch (error) {
+    await fs.rm(finalVideoPath, { force: true }).catch(() => null);
+    throw error;
   } finally {
-    await browser.close().catch(() => null);
+    inFlightCaptures.delete(videoId);
   }
-
-  if (!webmPath) {
-    throw new Error("ReachIQ recorded the website preview, but could not find the video file.");
-  }
-
-  await convertWebmToMp4(webmPath, finalVideoPath);
-  await fs.rm(tempVideoDir, { recursive: true, force: true }).catch(() => null);
-  await uploadVideoToStorage(videoId, finalVideoPath).catch((error) => {
-    console.error("[ReachIQ][video] Failed to upload generated video to storage", error);
-  });
-
-  return {
-    videoPath: finalVideoPath,
-    videoUrl: buildGeneratedWebsiteVideoUrl(videoId)
-  };
 }

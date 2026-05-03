@@ -75,3 +75,13 @@ export function resolveBrowserAppUrl() {
 export function buildBrowserAppUrl(pathname = "/") {
   return new URL(pathname, `${resolveBrowserAppUrl()}/`).toString();
 }
+
+export function buildAuthCallbackUrl(nextPath = "/dashboard") {
+  const callbackUrl = new URL("/auth/callback", `${resolveBrowserAppUrl()}/`);
+
+  if (nextPath && nextPath.startsWith("/")) {
+    callbackUrl.searchParams.set("next", nextPath);
+  }
+
+  return callbackUrl.toString();
+}

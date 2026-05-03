@@ -9,7 +9,7 @@ import { Logo } from "@/components/brand/Logo";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FullPageAuthLoader } from "@/components/auth/FullPageAuthLoader";
-import { buildBrowserAppUrl } from "@/lib/public-url";
+import { buildAuthCallbackUrl } from "@/lib/public-url";
 import { isSupabaseConfigured, supabase, supabaseConfigMessage } from "@/lib/supabase";
 import { useUserStore } from "@/store/useUserStore";
 
@@ -88,7 +88,7 @@ function VerifyEmailPageContent() {
                   type: "signup",
                   email,
                   options: {
-                    emailRedirectTo: buildBrowserAppUrl("/auth/callback")
+                    emailRedirectTo: buildAuthCallbackUrl("/dashboard")
                   }
                 });
                 if (error) {

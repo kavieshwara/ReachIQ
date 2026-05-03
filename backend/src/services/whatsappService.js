@@ -1,11 +1,22 @@
 import { supabaseAdmin } from "../utils/supabase.js";
 import { normalizeWhatsAppPhone, withTimestampError } from "../utils/helpers.js";
 import { decryptSecret, getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
+import { releaseGeneratedWebsiteVideo } from "./videoCaptureService.js";
 import {
   getStoredLinkedQrSessionInfo,
   sendQrTextMessage,
   sendQrVideoMessage
 } from "./whatsappQRService.js";
+
+function extractGeneratedVideoId(videoUrl) {
+  try {
+    const parsed = new URL(String(videoUrl || "").trim());
+    const match = parsed.pathname.match(/\/preview-video\/([^/]+)$/i);
+    return match?.[1] || null;
+  } catch {
+    return null;
+  }
+}
 
 async function resolveActiveConnection(userId) {
   const connection = await getActiveWhatsAppConnection(userId);
@@ -161,13 +172,28 @@ export async function sendUserVideoMessage({ userId, toPhone, videoUrl, caption 
     throw new Error("No active WhatsApp connection found.");
   }
 
+  const generatedVideoId = extractGeneratedVideoId(videoUrl);
+  const cleanupVideo = async () => {
+    if (!generatedVideoId) {
+      return;
+    }
+
+    await releaseGeneratedWebsiteVideo(generatedVideoId).catch((error) => {
+      console.warn(`[ReachIQ][video] could not clear local generated video ${generatedVideoId} after send: ${error.message}`);
+    });
+  };
+
   if (connection.provider_type === "meta") {
     const accessToken = decryptSecret(connection.access_token_encrypted);
     if (!connection.phone_number_id || !accessToken) {
       throw new Error("Meta WhatsApp credentials are incomplete.");
     }
-    return sendVideoMessage(connection.phone_number_id, accessToken, toPhone, videoUrl, caption);
+    const result = await sendVideoMessage(connection.phone_number_id, accessToken, toPhone, videoUrl, caption);
+    await cleanupVideo();
+    return result;
   }
 
-  return sendQrVideoMessage(userId, toPhone, videoUrl, caption);
+  const result = await sendQrVideoMessage(userId, toPhone, videoUrl, caption);
+  await cleanupVideo();
+  return result;
 }

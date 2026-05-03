@@ -19,8 +19,6 @@ import platformRoutes from "./routes/platform.js";
 import searchRoutes from "./routes/search.js";
 import notificationRoutes from "./routes/notifications.js";
 import internalRoutes from "./routes/internal.js";
-import { ensureGeneratedWebsiteVideoAvailable } from "./services/videoCaptureService.js";
-import { getGeneratedWebsitePreviewHtml } from "./services/websiteService.js";
 import { supabaseAdmin } from "./utils/supabase.js";
 
 const requiredEnvVars = [
@@ -115,6 +113,7 @@ app.get("/ping", (req, res) => {
 
 app.get("/preview/:id", async (req, res) => {
   try {
+    const { getGeneratedWebsitePreviewHtml } = await import("./services/websiteService.js");
     const html = await getGeneratedWebsitePreviewHtml(req.params.id);
     if (!html) {
       return res.status(404).send("Preview not found");
@@ -130,6 +129,7 @@ app.get("/preview/:id", async (req, res) => {
 
 app.get("/preview-video/:id", async (req, res) => {
   try {
+    const { ensureGeneratedWebsiteVideoAvailable } = await import("./services/videoCaptureService.js");
     const { videoPath: filePath } = await ensureGeneratedWebsiteVideoAvailable(req.params.id);
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "video/mp4");
@@ -174,10 +174,31 @@ app.listen(port, async () => {
   startDailyResetCron();
 
   try {
-    const { restoreSavedQRSessionsOnBoot } = await import("./services/whatsappQRService.js");
-    await restoreSavedQRSessionsOnBoot();
+    const { cleanupStaleVideoArtifacts } = await import("./services/videoCaptureService.js");
+    await cleanupStaleVideoArtifacts();
   } catch (error) {
-    console.error("[ReachIQ] QR session restore failed on boot", error);
+    console.error("[ReachIQ] stale video cleanup failed on boot", error);
+  }
+
+  const shouldRestoreQrSessions =
+    String(process.env.RESTORE_QR_SESSIONS_ON_BOOT || "false").toLowerCase() === "true";
+
+  if (shouldRestoreQrSessions) {
+    try {
+      const { restoreSavedQRSessionsOnBoot } = await import("./services/whatsappQRService.js");
+      await restoreSavedQRSessionsOnBoot();
+    } catch (error) {
+      console.error("[ReachIQ] QR session restore failed on boot", error);
+    }
+  } else {
+    console.info("[ReachIQ] Skipping QR session restore on boot; sessions will restore lazily when needed.");
+  }
+
+  const shouldWarmProviders =
+    String(process.env.WARM_AI_PROVIDERS_ON_BOOT || "false").toLowerCase() === "true";
+
+  if (!shouldWarmProviders) {
+    return;
   }
 
   try {
