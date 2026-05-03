@@ -132,15 +132,6 @@ export async function processCampaignMessages({ campaignId, userId }) {
   const leads = (campaign.campaign_leads || []).filter((item) => item.status === "pending");
   const preparedOutreachByLeadId = new Map();
 
-  const initialConnection = await resolveCampaignConnection(userId);
-  if (!initialConnection || initialConnection.status !== "connected") {
-    await supabaseAdmin
-      .from("campaigns")
-      .update({ status: "awaiting_whatsapp", updated_at: nowIso() })
-      .eq("id", campaignId);
-    return;
-  }
-
   for (const item of leads) {
     try {
       const outreach = await prepareCampaignLeadOutreach({
@@ -222,6 +213,17 @@ export async function processCampaignMessages({ campaignId, userId }) {
     }
 
     try {
+      const liveConnection = await resolveCampaignConnection(userId);
+      if (!liveConnection || liveConnection.status !== "connected") {
+        awaitingReconnect = true;
+        await supabaseAdmin
+          .from("campaigns")
+          .update({ status: "awaiting_whatsapp", updated_at: nowIso() })
+          .eq("id", campaignId);
+        await refreshCampaignMetrics(campaignId);
+        break;
+      }
+
       const personalizedMessage = finalizeOutboundCaption(
         outreach.personalizedMessage || interpolateTemplate(campaign.message_template, item.leads)
       );
