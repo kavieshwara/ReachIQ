@@ -355,6 +355,7 @@ router.post("/:id/launch", async (req, res, next) => {
     if (error) throw error;
 
     await queueCampaignProcessing(data.id, req.user.id, "launch");
+    await refreshCampaignMetrics(data.id).catch(() => null);
 
     await createNotification({
       userId: req.user.id,

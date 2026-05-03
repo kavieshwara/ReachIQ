@@ -269,7 +269,10 @@ export async function processCampaignMessages({ campaignId, userId }) {
       await updatePreparationSendState({
         campaignId,
         campaignLeadId: item.id,
-        payload: { send_status: "sent" }
+        payload: {
+          send_status: "sent",
+          generation_error: null
+        }
       });
 
       await supabaseAdmin
