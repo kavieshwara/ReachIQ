@@ -47,7 +47,9 @@ function isQrSessionCryptoError(errorLike) {
     message.includes("No matching sessions found for message") ||
     message.includes("Bad MAC") ||
     message.includes("Invalid PreKey ID") ||
-    message.includes("failed to decrypt message")
+    message.includes("failed to decrypt message") ||
+    message.includes("MessageCounterError") ||
+    message.includes("Key used already or never filled")
   );
 }
 
