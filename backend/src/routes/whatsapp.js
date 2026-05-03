@@ -28,6 +28,7 @@ import {
   sendTestMessage,
   verifyWhatsAppCredentials
 } from "../services/whatsappService.js";
+import { resumeAwaitingWhatsAppCampaigns } from "../services/campaignQueueService.js";
 import { getDemoWhatsAppStatus, isDemoMode } from "../utils/demo.js";
 
 const router = express.Router();
@@ -178,6 +179,10 @@ async function connectMetaProvider(req, res) {
     lastActiveAt: new Date().toISOString()
   });
 
+  await resumeAwaitingWhatsAppCampaigns(req.user.id, "meta_connected").catch((error) => {
+    console.warn(`[ReachIQ][meta] could not resume awaiting campaigns for ${req.user.id}: ${error.message}`);
+  });
+
   return res.json({
     success: true,
     connection: serializeConnectionForClient(saved),
@@ -303,6 +308,11 @@ router.get("/status", async (req, res, next) => {
       qrSnapshot.status === "connecting" ||
       qrSnapshot.status === "waiting_for_scan"
     ) {
+      if (qrSnapshot.status === "connected") {
+        await resumeAwaitingWhatsAppCampaigns(req.user.id, "qr_status_connected").catch((error) => {
+          console.warn(`[ReachIQ][qr] could not resume awaiting campaigns from status for ${req.user.id}: ${error.message}`);
+        });
+      }
       return res.json({
         ...buildQrStatusFromSnapshot(qrSnapshot),
         metaVerified: false,
@@ -320,6 +330,11 @@ router.get("/status", async (req, res, next) => {
     }
 
     const serialized = serializeConnectionForClient(activeConnection);
+    if (serialized.connected) {
+      await resumeAwaitingWhatsAppCampaigns(req.user.id, "status_connected").catch((error) => {
+        console.warn(`[ReachIQ][status] could not resume awaiting campaigns for ${req.user.id}: ${error.message}`);
+      });
+    }
     res.json({
       ...serialized,
       metaVerified: Boolean(activeConnection?.provider_type === "meta" && activeConnection?.status === "connected"),
@@ -432,6 +447,11 @@ router.get("/qr/status", async (req, res, next) => {
       snapshot.status === "connecting" ||
       snapshot.status === "waiting_for_scan"
     ) {
+      if (snapshot.status === "connected") {
+        await resumeAwaitingWhatsAppCampaigns(req.user.id, "qr_snapshot_connected").catch((error) => {
+          console.warn(`[ReachIQ][qr] could not resume awaiting campaigns from qr/status for ${req.user.id}: ${error.message}`);
+        });
+      }
       return res.json(buildQrStatusFromSnapshot(snapshot));
     }
 

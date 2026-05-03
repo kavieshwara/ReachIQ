@@ -12,6 +12,7 @@ import {
   getActiveWhatsAppConnection,
   saveWhatsAppConnection
 } from "./whatsappConnectionService.js";
+import { resumeAwaitingWhatsAppCampaigns } from "./campaignQueueService.js";
 import { getGeneratedWebsiteVideoFilePath } from "./videoCaptureService.js";
 
 const { Boom } = boomModule;
@@ -557,6 +558,9 @@ async function buildSocket(userId, forceFresh = false) {
           phoneNumber: phoneNumber || snapshotBeforeSave.phoneNumber || null,
           socketUser: socketUser || snapshotBeforeSave.socketUser || null,
           lastActiveAt: activeAt
+        });
+        await resumeAwaitingWhatsAppCampaigns(userId, "qr_reconnected").catch((error) => {
+          console.warn(`[ReachIQ][qr] could not resume awaiting campaigns for ${userId}: ${error.message}`);
         });
         scheduleSessionBackup(userId);
         const snapshot = getQRSessionSnapshot(userId);

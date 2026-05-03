@@ -172,14 +172,27 @@ export default function CampaignDetailPage() {
   const campaignId = params?.id ?? "";
   const router = useRouter();
   const [campaign, setCampaign] = useState<any>(null);
+  const [whatsappStatus, setWhatsAppStatus] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
     setRefreshing(true);
     try {
-      const { data } = await api.get(`/api/campaigns/${campaignId}`);
-      setCampaign(data);
+      const [campaignResponse, whatsappResponse] = await Promise.allSettled([
+        api.get(`/api/campaigns/${campaignId}`),
+        api.get("/api/whatsapp/status")
+      ]);
+
+      if (campaignResponse.status === "fulfilled") {
+        setCampaign(campaignResponse.value.data);
+      } else {
+        throw campaignResponse.reason;
+      }
+
+      if (whatsappResponse.status === "fulfilled") {
+        setWhatsAppStatus(whatsappResponse.value.data);
+      }
     } finally {
       setRefreshing(false);
     }
@@ -219,6 +232,7 @@ export default function CampaignDetailPage() {
     const preparation = preparationByLead.get(item.id);
     return isReconnectableWhatsAppError(item?.error_message) || isReconnectableWhatsAppError(preparation?.generation_error);
   });
+  const hasLiveWhatsAppConnection = Boolean(whatsappStatus?.connected);
   const isLegacyHostedFailureCampaign =
     !campaign.automation_config &&
     !(campaign.outreach_preparations || []).length &&
@@ -233,7 +247,9 @@ export default function CampaignDetailPage() {
     campaign.status === "draft"
       ? "This campaign is still a draft. Click Launch to start generating websites, preparing messages, and sending."
       : campaign.status === "awaiting_whatsapp"
-        ? "WhatsApp must be connected before ReachIQ can continue. Connect WhatsApp, then resume the campaign."
+        ? hasLiveWhatsAppConnection
+          ? "WhatsApp is connected again. ReachIQ is syncing this campaign back onto the live sender now."
+          : "WhatsApp must be connected before ReachIQ can continue. Connect WhatsApp, then resume the campaign."
         : campaign.status === "running"
           ? "ReachIQ is preparing each lead one by one. Pending means the website or message is still being generated."
           : campaign.status === "paused"
@@ -329,14 +345,23 @@ export default function CampaignDetailPage() {
           <p className="text-sm leading-6 text-textSecondary">{statusHelper}</p>
           {campaign.status === "awaiting_whatsapp" || hasReconnectableWhatsAppError ? (
             <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning">
-              <p>
-                ReachIQ has this campaign paused until WhatsApp is connected again. If your phone still shows the linked device,
-                the hosted QR session was likely dropped during a backend restart and needs a fresh reconnect before you click Launch again.
-              </p>
+              {hasLiveWhatsAppConnection ? (
+                <p>
+                  ReachIQ can see that WhatsApp is connected again. This campaign was paused during an earlier disconnect, and the backend is now refreshing it for the live QR session.
+                  If the status stays here for more than a few seconds, click Launch once to nudge the run forward.
+                </p>
+              ) : (
+                <p>
+                  ReachIQ has this campaign paused until WhatsApp is connected again. If your phone still shows the linked device,
+                  the hosted QR session was likely dropped during a backend restart and needs a fresh reconnect before you click Launch again.
+                </p>
+              )}
               <div className="mt-3 flex flex-wrap gap-3">
-                <Link href="/dashboard/connect">
-                  <Button size="sm">Reconnect WhatsApp</Button>
-                </Link>
+                {!hasLiveWhatsAppConnection ? (
+                  <Link href="/dashboard/connect">
+                    <Button size="sm">Reconnect WhatsApp</Button>
+                  </Link>
+                ) : null}
                 <Button
                   size="sm"
                   variant="secondary"
