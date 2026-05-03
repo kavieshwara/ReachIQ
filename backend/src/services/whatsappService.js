@@ -3,7 +3,8 @@ import { normalizeWhatsAppPhone, withTimestampError } from "../utils/helpers.js"
 import { decryptSecret, getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
 import { releaseGeneratedWebsiteVideo } from "./videoCaptureService.js";
 import {
-  getStoredLinkedQrSessionInfo,
+  getQRSessionSnapshot,
+  restoreQRSessionIfAvailable,
   sendQrTextMessage,
   sendQrVideoMessage
 } from "./whatsappQRService.js";
@@ -20,18 +21,25 @@ function extractGeneratedVideoId(videoUrl) {
 
 async function resolveActiveConnection(userId) {
   const connection = await getActiveWhatsAppConnection(userId);
-  if (connection?.status === "connected") {
+  if (connection?.provider_type !== "qr" && connection?.status === "connected") {
     return connection;
   }
 
-  const storedQr = await getStoredLinkedQrSessionInfo(userId);
-  if (storedQr) {
+  if (connection?.provider_type === "qr") {
+    const liveSnapshot = getQRSessionSnapshot(userId);
+    if (liveSnapshot.status === "connected") {
+      return connection;
+    }
+  }
+
+  const restoredQr = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  if (restoredQr?.status === "connected") {
     return {
       provider_type: "qr",
       status: "connected",
-      phone_number: storedQr.phoneNumber,
+      phone_number: restoredQr.phoneNumber,
       session_data: {
-        socketUser: storedQr.socketUser,
+        socketUser: restoredQr.socketUser,
         restoredFromDisk: true
       }
     };

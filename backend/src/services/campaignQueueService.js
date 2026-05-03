@@ -51,3 +51,36 @@ export async function resumeAwaitingWhatsAppCampaigns(userId, reason = "whatsapp
 
   return campaignIds;
 }
+
+export async function pauseActiveCampaignsAwaitingWhatsApp(userId, reason = "whatsapp_disconnected") {
+  const { data: campaigns, error } = await supabaseAdmin
+    .from("campaigns")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "running");
+
+  if (error) {
+    throw error;
+  }
+
+  const campaignIds = (campaigns || []).map((campaign) => campaign.id).filter(Boolean);
+  if (!campaignIds.length) {
+    return [];
+  }
+
+  const { error: updateError } = await supabaseAdmin
+    .from("campaigns")
+    .update({
+      status: "awaiting_whatsapp",
+      updated_at: nowIso()
+    })
+    .in("id", campaignIds)
+    .eq("user_id", userId);
+
+  if (updateError) {
+    throw updateError;
+  }
+
+  console.warn(`[ReachIQ][campaigns] paused ${campaignIds.length} active campaign(s) for ${userId}: ${reason}`);
+  return campaignIds;
+}

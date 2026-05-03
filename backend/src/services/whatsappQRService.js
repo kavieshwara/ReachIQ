@@ -13,7 +13,10 @@ import {
   getActiveWhatsAppConnection,
   saveWhatsAppConnection
 } from "./whatsappConnectionService.js";
-import { resumeAwaitingWhatsAppCampaigns } from "./campaignQueueService.js";
+import {
+  pauseActiveCampaignsAwaitingWhatsApp,
+  resumeAwaitingWhatsAppCampaigns
+} from "./campaignQueueService.js";
 import { getGeneratedWebsiteVideoFilePath } from "./videoCaptureService.js";
 
 const { Boom } = boomModule;
@@ -408,6 +411,10 @@ async function cleanupSessionFiles(userId) {
   await fs.rm(sessionDir, { recursive: true, force: true }).catch(() => null);
 }
 
+async function ensureSessionDirExists(userId) {
+  await fs.mkdir(getSessionDir(userId), { recursive: true });
+}
+
 async function hasSavedSessionFiles(userId) {
   const sessionDir = getSessionDir(userId);
   try {
@@ -475,6 +482,12 @@ export async function disconnectQRSession(userId, { clearAuth = true } = {}) {
   await clearScheduledSessionBackup(userId);
   sessionState.delete(userId);
   await disconnectWhatsAppProvider(userId, "qr");
+  await pauseActiveCampaignsAwaitingWhatsApp(
+    userId,
+    clearAuth ? "qr_disconnected" : "qr_connection_lost"
+  ).catch((error) => {
+    console.warn(`[ReachIQ][qr] could not pause active campaigns for ${userId}: ${error.message}`);
+  });
 
   if (clearAuth) {
     await cleanupSessionFiles(userId);
@@ -588,12 +601,16 @@ async function buildSocket(userId, forceFresh = false) {
   });
 
   sock.ev.on("creds.update", (...args) => {
-    Promise.resolve(saveCreds(...args)).catch((error) => {
-      console.error(`[ReachIQ][qr] creds.update save failed for ${userId}`, error);
-      return;
-    }).then(() => {
-      scheduleSessionBackup(userId);
-    });
+    Promise.resolve()
+      .then(() => ensureSessionDirExists(userId))
+      .then(() => saveCreds(...args))
+      .catch((error) => {
+        console.error(`[ReachIQ][qr] creds.update save failed for ${userId}`, error);
+        return;
+      })
+      .then(() => {
+        scheduleSessionBackup(userId);
+      });
   });
   sessionSockets.set(userId, sock);
 
@@ -724,6 +741,9 @@ async function buildSocket(userId, forceFresh = false) {
           phoneNumber: snapshot.phoneNumber || null,
           socketUser: snapshot.socketUser || null,
           lastActiveAt: snapshot.lastActiveAt || null
+        });
+        await pauseActiveCampaignsAwaitingWhatsApp(userId, "qr_connection_closed").catch((error) => {
+          console.warn(`[ReachIQ][qr] could not pause active campaigns after close for ${userId}: ${error.message}`);
         });
         emitToSubscribers(userId, { type: "status", status: "disconnected" });
       }

@@ -1,24 +1,31 @@
 import { supabaseAdmin } from "../utils/supabase.js";
 import { nowIso, withTimestampError } from "../utils/helpers.js";
 import { getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
-import { getStoredLinkedQrSessionInfo } from "./whatsappQRService.js";
+import { getQRSessionSnapshot, restoreQRSessionIfAvailable } from "./whatsappQRService.js";
 import { sendUserTextMessage } from "./whatsappService.js";
 import { getLiveMessageAllowance, incrementMessageCount } from "./campaignService.js";
 
 async function resolveFollowUpConnection(userId) {
   const activeConnection = await getActiveWhatsAppConnection(userId);
-  if (activeConnection?.status === "connected") {
+  if (activeConnection?.provider_type !== "qr" && activeConnection?.status === "connected") {
     return activeConnection;
   }
 
-  const storedQr = await getStoredLinkedQrSessionInfo(userId);
-  if (storedQr) {
+  if (activeConnection?.provider_type === "qr") {
+    const liveSnapshot = getQRSessionSnapshot(userId);
+    if (liveSnapshot.status === "connected") {
+      return activeConnection;
+    }
+  }
+
+  const restoredQr = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  if (restoredQr?.status === "connected") {
     return {
       provider_type: "qr",
       status: "connected",
-      phone_number: storedQr.phoneNumber,
+      phone_number: restoredQr.phoneNumber,
       session_data: {
-        socketUser: storedQr.socketUser,
+        socketUser: restoredQr.socketUser,
         restoredFromDisk: true
       }
     };

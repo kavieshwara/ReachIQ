@@ -11,8 +11,11 @@ function normalizeUrl(value?: string | null) {
   return trimmed.replace(/\/$/, "");
 }
 
-const hostedFallbackApiUrl = "https://reachiq-api.onrender.com";
-const blockedHostedApiUrls = new Set(["https://reachiq-hqzc.onrender.com"]);
+const hostedFallbackApiUrl = "https://3.111.184.108.sslip.io";
+const blockedHostedApiUrls = new Set([
+  "https://reachiq-hqzc.onrender.com",
+  "https://reachiq-api.onrender.com"
+]);
 
 function shouldRejectConfiguredApiUrl(value: string) {
   if (blockedHostedApiUrls.has(value)) {
