@@ -21,6 +21,28 @@ if (!supabaseUrl || !serviceKey) {
 }
 
 async function fetchWithTimeout(input, init = {}) {
+  if (process.platform !== "win32") {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), supabaseFetchTimeoutMs);
+
+    try {
+      return await fetch(input, {
+        ...init,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error?.name === "AbortError" || error?.name === "TimeoutError") {
+        const timeoutError = new Error(`Supabase request timed out after ${supabaseFetchTimeoutMs}ms`);
+        timeoutError.name = "SupabaseTimeoutError";
+        throw timeoutError;
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   const request = input instanceof Request ? input : null;
   const requestUrl = request ? request.url : String(input);
   const method = String(init.method || request?.method || "GET").toUpperCase();
