@@ -90,17 +90,36 @@ app.use(express.json({ limit: "4mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(apiRateLimiter);
 
-app.get("/health", async (req, res) => {
+app.get("/health", (req, res) => {
+  res.json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
+    environment: process.env.NODE_ENV,
+    memory: process.memoryUsage()
+  });
+});
+
+app.get("/health/deep", async (req, res) => {
   try {
+    const startedAt = Date.now();
     const { error } = await supabaseAdmin.from("admin_settings").select("key").limit(1);
     res.json({
-      status: "ok",
+      status: error ? "degraded" : "ok",
       timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
       database: error ? "error" : "connected",
-      environment: process.env.NODE_ENV
+      latencyMs: Date.now() - startedAt,
+      error: error?.message || null
     });
   } catch (err) {
-    res.status(500).json({ status: "error", message: err.message });
+    res.status(503).json({
+      status: "error",
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      database: "unreachable",
+      message: err.message
+    });
   }
 });
 

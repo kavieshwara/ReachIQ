@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
 
 const primaryHostedHost = "reachiq-zeta.vercel.app";
 const legacyHostedHosts = new Set(["reachiq-kavieshwaras-projects.vercel.app"]);
@@ -31,6 +30,14 @@ function buildOAuthErrorMessage(errorDescription: string | null) {
   }
 
   return errorDescription || "Authentication could not be completed right now.";
+}
+
+function hasSupabaseSessionCookie(req: NextRequest) {
+  return req.cookies
+    .getAll()
+    .some((cookie) =>
+      /^(?:__Secure-|__Host-)?sb-[a-z0-9-]+-auth-token(?:\.\d+)?$/i.test(cookie.name)
+    );
 }
 
 export async function middleware(req: NextRequest) {
@@ -81,14 +88,10 @@ export async function middleware(req: NextRequest) {
     return res;
   }
 
-  const supabase = createMiddlewareClient({ req, res });
-  const {
-    data: { session }
-  } = await supabase.auth.getSession();
+  const hasSessionCookie = hasSupabaseSessionCookie(req);
+  console.info("[ReachIQ][middleware] auth cookie check", pathname, hasSessionCookie ? "cookie-present" : "no-cookie");
 
-  console.info("[ReachIQ][middleware] auth check", pathname, session?.user?.id || "no-user");
-
-  if (!session?.user) {
+  if (!hasSessionCookie) {
     const redirectUrl = req.nextUrl.clone();
     redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("redirectedFrom", pathname);
