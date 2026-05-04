@@ -9,7 +9,7 @@ import { createNotification } from "../services/notificationService.js";
 import { getCampaignPreparations } from "../services/outreachPreparationService.js";
 import { resumeAwaitingWhatsAppCampaigns } from "../services/campaignQueueService.js";
 import { getActiveWhatsAppConnection } from "../services/whatsappConnectionService.js";
-import { getQRSessionSnapshot, restoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
+import { getQRSessionSnapshot, hasRecoverableQrAuthState, scheduleQRSessionRestore, tryRestoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
 import { createDemoCampaign, getDemoCampaignById, getDemoCampaigns, isDemoMode, launchDemoCampaign, updateDemoCampaign } from "../utils/demo.js";
 
 const router = express.Router();
@@ -57,7 +57,19 @@ async function hasLiveCampaignSenderConnection(userId) {
     return true;
   }
 
-  const restoredQrSnapshot = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  const hasRecoverableAuth = await hasRecoverableQrAuthState(userId).catch(() => false);
+  if (!(activeConnection?.provider_type === "qr" || hasRecoverableAuth)) {
+    return false;
+  }
+
+  const restoredQrSnapshot = await tryRestoreQRSessionIfAvailable(userId, {
+    timeoutMs: 1800,
+    reason: "campaign_gate"
+  }).catch(() => null);
+  if (!restoredQrSnapshot) {
+    scheduleQRSessionRestore(userId, { reason: "campaign_gate_retry" });
+  }
+
   return restoredQrSnapshot?.status === "connected";
 }
 

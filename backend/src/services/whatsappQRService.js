@@ -33,6 +33,10 @@ const SESSION_ROOT = path.resolve(process.cwd(), process.env.WHATSAPP_QR_SESSION
 const QR_SESSION_BACKUP_KEY_PREFIX = "qr_session_backup:";
 const QR_CRYPTO_FAILURE_WINDOW_MS = 60_000;
 const QR_CRYPTO_FAILURE_THRESHOLD = 6;
+const QR_ROUTE_RESTORE_TIMEOUT_MS = Math.max(1000, Number(process.env.QR_ROUTE_RESTORE_TIMEOUT_MS || 2500));
+const QR_RESTORE_RETRY_COOLDOWN_MS = Math.max(3000, Number(process.env.QR_RESTORE_RETRY_COOLDOWN_MS || 15000));
+const QR_RECONNECT_STORM_WINDOW_MS = 120_000;
+const QR_RECONNECT_STORM_THRESHOLD = 5;
 const QR_SESSION_RECOVERY_MESSAGE = "ReachIQ detected a stale WhatsApp QR session. Refresh the QR session and reconnect WhatsApp.";
 
 const sessionSockets = new Map();
@@ -43,7 +47,17 @@ const sessionRestorePromises = new Map();
 const sessionBackupTimers = new Map();
 const sessionCryptoFailures = new Map();
 const sessionCredFlushPromises = new Map();
+const scheduledSessionRestores = new Map();
+const sessionLastRestoreAttemptAt = new Map();
+const sessionReconnectStorms = new Map();
 const baseBaileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "error" });
+
+class QrRestoreTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "QrRestoreTimeoutError";
+  }
+}
 
 function isQrSessionCryptoError(errorLike) {
   const message = String(errorLike?.message || errorLike || "");
@@ -59,6 +73,27 @@ function isQrSessionCryptoError(errorLike) {
 
 function resetQrCryptoFailures(userId) {
   sessionCryptoFailures.delete(userId);
+}
+
+function resetQrReconnectStorm(userId) {
+  sessionReconnectStorms.delete(userId);
+}
+
+function trackQrReconnectAttempt(userId) {
+  const now = Date.now();
+  const tracker = sessionReconnectStorms.get(userId) || {
+    count: 0,
+    firstAt: now
+  };
+
+  if (now - tracker.firstAt > QR_RECONNECT_STORM_WINDOW_MS) {
+    tracker.count = 0;
+    tracker.firstAt = now;
+  }
+
+  tracker.count += 1;
+  sessionReconnectStorms.set(userId, tracker);
+  return tracker.count >= QR_RECONNECT_STORM_THRESHOLD;
 }
 
 async function invalidatePoisonedQrSession(userId, reason) {
@@ -141,6 +176,15 @@ async function clearScheduledSessionBackup(userId) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    sleep(timeoutMs).then(() => {
+      throw new QrRestoreTimeoutError(`${label} timed out after ${timeoutMs}ms`);
+    })
+  ]);
 }
 
 async function listSessionFilesRecursive(rootDir) {
@@ -564,6 +608,7 @@ export function getQRSessionSnapshot(userId) {
 
 export async function disconnectQRSession(userId, { clearAuth = true } = {}) {
   resetQrCryptoFailures(userId);
+  resetQrReconnectStorm(userId);
   const socket = sessionSockets.get(userId);
   if (socket) {
     if (clearAuth) {
@@ -653,6 +698,60 @@ export async function restoreQRSessionIfAvailable(userId) {
   }
 
   return getQRSessionSnapshot(userId);
+}
+
+export async function tryRestoreQRSessionIfAvailable(
+  userId,
+  { timeoutMs = QR_ROUTE_RESTORE_TIMEOUT_MS, reason = "route" } = {}
+) {
+  try {
+    return await withTimeout(restoreQRSessionIfAvailable(userId), timeoutMs, `ReachIQ QR restore (${reason})`);
+  } catch (error) {
+    if (error instanceof QrRestoreTimeoutError) {
+      console.warn(`[ReachIQ][qr] ${error.message}`);
+      void scheduleQRSessionRestore(userId, {
+        reason: `${reason}_timeout`,
+        force: true,
+        delayMs: 250
+      });
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export function scheduleQRSessionRestore(
+  userId,
+  { reason = "background", force = false, delayMs = 0 } = {}
+) {
+  if (sessionSockets.has(userId) || sessionRestorePromises.has(userId) || scheduledSessionRestores.has(userId)) {
+    return false;
+  }
+
+  const now = Date.now();
+  const lastAttemptAt = sessionLastRestoreAttemptAt.get(userId) || 0;
+  if (!force && now - lastAttemptAt < QR_RESTORE_RETRY_COOLDOWN_MS) {
+    return false;
+  }
+
+  sessionLastRestoreAttemptAt.set(userId, now);
+  const scheduledPromise = (async () => {
+    if (delayMs > 0) {
+      await sleep(delayMs);
+    }
+
+    try {
+      await restoreQRSessionIfAvailable(userId);
+    } catch (error) {
+      console.warn(`[ReachIQ][qr] background restore failed for ${userId} (${reason}): ${error.message}`);
+    } finally {
+      scheduledSessionRestores.delete(userId);
+    }
+  })();
+
+  scheduledSessionRestores.set(userId, scheduledPromise);
+  return true;
 }
 
 export async function restoreSavedQRSessionsOnBoot() {
@@ -777,6 +876,7 @@ async function buildSocket(userId, forceFresh = false) {
 
       if (connection === "open") {
         resetQrCryptoFailures(userId);
+        resetQrReconnectStorm(userId);
         const snapshotBeforeSave = getQRSessionSnapshot(userId);
         const socketUser = sock.user?.id || snapshotBeforeSave.socketUser || "";
         const phoneNumber = normalizeWhatsAppPhone(
@@ -880,6 +980,28 @@ async function buildSocket(userId, forceFresh = false) {
         }
 
         if (shouldRestart) {
+          const reconnectStormDetected = trackQrReconnectAttempt(userId);
+          if (reconnectStormDetected) {
+            const snapshot = setSessionState(userId, {
+              status: "disconnected",
+              qrImage: null,
+              expiresAt: null
+            });
+            await persistQrConnectionState(userId, {
+              status: "disconnected",
+              phoneNumber: snapshot.phoneNumber || null,
+              socketUser: snapshot.socketUser || null,
+              lastActiveAt: snapshot.lastActiveAt || null
+            }).catch((error) => {
+              console.warn(`[ReachIQ][qr] could not persist restart storm state for ${userId}: ${error.message}`);
+            });
+            await pauseActiveCampaignsAwaitingWhatsApp(userId, "qr_reconnect_required").catch((error) => {
+              console.warn(`[ReachIQ][qr] could not pause active campaigns after restart storm for ${userId}: ${error.message}`);
+            });
+            emitToSubscribers(userId, { type: "status", status: "disconnected" });
+            return;
+          }
+
           setSessionState(userId, {
             status: "connecting",
             qrImage: null,
@@ -899,6 +1021,28 @@ async function buildSocket(userId, forceFresh = false) {
         }
 
         if (hasRecoverableAuth) {
+          const reconnectStormDetected = trackQrReconnectAttempt(userId);
+          if (reconnectStormDetected) {
+            const snapshot = setSessionState(userId, {
+              status: "disconnected",
+              qrImage: null,
+              expiresAt: null
+            });
+            await persistQrConnectionState(userId, {
+              status: "disconnected",
+              phoneNumber: snapshot.phoneNumber || null,
+              socketUser: snapshot.socketUser || null,
+              lastActiveAt: snapshot.lastActiveAt || null
+            }).catch((error) => {
+              console.warn(`[ReachIQ][qr] could not persist reconnect storm state for ${userId}: ${error.message}`);
+            });
+            await pauseActiveCampaignsAwaitingWhatsApp(userId, "qr_reconnect_required").catch((error) => {
+              console.warn(`[ReachIQ][qr] could not pause active campaigns after reconnect storm for ${userId}: ${error.message}`);
+            });
+            emitToSubscribers(userId, { type: "status", status: "disconnected" });
+            return;
+          }
+
           setSessionState(userId, {
             status: "connecting",
             qrImage: null,

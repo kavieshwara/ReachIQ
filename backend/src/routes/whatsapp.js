@@ -25,6 +25,7 @@ import {
   getStoredLinkedQrSessionInfo,
   removeQRSubscriber,
   restoreQRSessionIfAvailable,
+  scheduleQRSessionRestore,
   startOrRestoreQRSession
 } from "../services/whatsappQRService.js";
 import {
@@ -80,10 +81,14 @@ async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
     };
   }
 
-  const restored = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  const restored = await Promise.race([
+    restoreQRSessionIfAvailable(userId).catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), 2500))
+  ]);
   if (restored) {
     snapshot = restored;
   } else {
+    scheduleQRSessionRestore(userId, { reason: "status_route_retry" });
     snapshot = getQRSessionSnapshot(userId);
   }
 
