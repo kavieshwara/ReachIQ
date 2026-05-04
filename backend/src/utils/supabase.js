@@ -1,6 +1,6 @@
 import dns from "node:dns";
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -57,20 +57,21 @@ async function fetchWithTimeout(input, init = {}) {
     });
 
     if (requestBody !== undefined && requestBody !== null && method !== "GET" && method !== "HEAD") {
-      const bodyText =
-        typeof requestBody === "string"
-          ? requestBody
+      const bodyBuffer = Buffer.isBuffer(requestBody)
+        ? requestBody
+        : typeof requestBody === "string"
+          ? Buffer.from(requestBody, "utf8")
           : requestBody instanceof URLSearchParams
-            ? requestBody.toString()
-            : Buffer.isBuffer(requestBody)
-              ? requestBody.toString("utf8")
-              : requestBody instanceof ArrayBuffer
-                ? Buffer.from(requestBody).toString("utf8")
-                : ArrayBuffer.isView(requestBody)
-                  ? Buffer.from(requestBody.buffer, requestBody.byteOffset, requestBody.byteLength).toString("utf8")
-                  : String(requestBody);
+            ? Buffer.from(requestBody.toString(), "utf8")
+            : requestBody instanceof ArrayBuffer
+              ? Buffer.from(requestBody)
+              : ArrayBuffer.isView(requestBody)
+                ? Buffer.from(requestBody.buffer, requestBody.byteOffset, requestBody.byteLength)
+                : Buffer.from(String(requestBody), "utf8");
 
-      args.push("--data-binary", bodyText);
+      const requestBodyPath = path.join(tempDir, "body.bin");
+      await writeFile(requestBodyPath, bodyBuffer);
+      args.push("--data-binary", `@${requestBodyPath}`);
     }
 
     try {
@@ -104,7 +105,9 @@ async function fetchWithTimeout(input, init = {}) {
         }
       }
 
-      return new Response(stdout, {
+      const responseBody = status === 204 || status === 205 || status === 304 ? null : stdout;
+
+      return new Response(responseBody, {
         status,
         headers: responseHeaders
       });
