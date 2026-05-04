@@ -45,7 +45,16 @@ async function resolveActiveConnection(userId) {
     };
   }
 
-  return connection;
+  if (connection?.provider_type === "qr") {
+    return connection
+      ? {
+          ...connection,
+          status: "disconnected"
+        }
+      : null;
+  }
+
+  return connection ?? null;
 }
 
 export async function verifyWhatsAppCredentials(phoneNumberId, accessToken) {

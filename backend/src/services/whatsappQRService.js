@@ -313,7 +313,7 @@ export function ensureQrSessionBackup(userId) {
 function scheduleSessionBackup(userId) {
   void clearScheduledSessionBackup(userId);
   const timer = setTimeout(() => {
-    void persistSessionBackup(userId).catch((error) => {
+    void persistSessionBackupWithRetry(userId, { attempts: 4, delayMs: 900 }).catch((error) => {
       console.error(`[ReachIQ][qr] failed to persist WhatsApp session backup for ${userId}`, error);
     }).finally(() => {
       sessionBackupTimers.delete(userId);
@@ -566,11 +566,19 @@ export async function disconnectQRSession(userId, { clearAuth = true } = {}) {
   resetQrCryptoFailures(userId);
   const socket = sessionSockets.get(userId);
   if (socket) {
-    try {
-      await socket.logout();
-    } catch {
+    if (clearAuth) {
       try {
-        socket.end?.(new Error("ReachIQ QR disconnect"));
+        await socket.logout();
+      } catch {
+        try {
+          socket.end?.(new Error("ReachIQ QR disconnect"));
+        } catch {
+          // ignore
+        }
+      }
+    } else {
+      try {
+        socket.end?.(new Error("ReachIQ QR soft disconnect"));
       } catch {
         // ignore
       }

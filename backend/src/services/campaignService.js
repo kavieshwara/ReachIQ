@@ -130,7 +130,16 @@ async function resolveCampaignConnection(userId) {
     };
   }
 
-  return activeConnection;
+  if (activeConnection?.provider_type === "qr") {
+    return activeConnection
+      ? {
+          ...activeConnection,
+          status: "disconnected"
+        }
+      : null;
+  }
+
+  return activeConnection ?? null;
 }
 
 export async function processCampaignMessages({ campaignId, userId }) {

@@ -72,7 +72,7 @@ async function resetReconnectBlockedLeadRows(campaignIds, userId) {
         for (const preparation of compatPreparations) {
           if (
             preparation?.campaign_lead_id &&
-            preparation?.send_status === "failed" &&
+            ["failed", "pending"].includes(preparation?.send_status) &&
             isReconnectableWhatsAppError(preparation?.generation_error)
           ) {
             reconnectBlockedPreparationLeadIds.add(preparation.campaign_lead_id);
@@ -95,7 +95,7 @@ async function resetReconnectBlockedLeadRows(campaignIds, userId) {
       .filter(
         (preparation) =>
           preparation?.campaign_lead_id &&
-          preparation?.send_status === "failed" &&
+          ["failed", "pending"].includes(preparation?.send_status) &&
           isReconnectableWhatsAppError(preparation?.generation_error)
       )
       .map((preparation) => preparation.campaign_lead_id);
