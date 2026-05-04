@@ -191,20 +191,15 @@ export default function CampaignDetailPage() {
   const load = async () => {
     setRefreshing(true);
     try {
-      const [campaignResponse, whatsappResponse] = await Promise.allSettled([
-        api.get(`/api/campaigns/${campaignId}`),
-        api.get("/api/whatsapp/status")
-      ]);
-
-      if (campaignResponse.status === "fulfilled") {
-        setCampaign(campaignResponse.value.data);
-      } else {
-        throw campaignResponse.reason;
+      try {
+        const whatsappResponse = await api.get("/api/whatsapp/status");
+        setWhatsAppStatus(whatsappResponse.data);
+      } catch (whatsappError) {
+        console.warn("[ReachIQ][campaigns] could not refresh WhatsApp status before campaign load", whatsappError);
       }
 
-      if (whatsappResponse.status === "fulfilled") {
-        setWhatsAppStatus(whatsappResponse.value.data);
-      }
+      const campaignResponse = await api.get(`/api/campaigns/${campaignId}`);
+      setCampaign(campaignResponse.data);
     } finally {
       setRefreshing(false);
     }

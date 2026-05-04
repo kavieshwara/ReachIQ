@@ -42,6 +42,7 @@ const qrSubscribers = new Map();
 const sessionRestorePromises = new Map();
 const sessionBackupTimers = new Map();
 const sessionCryptoFailures = new Map();
+const sessionCredFlushPromises = new Map();
 const baseBaileysLogger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "error" });
 
 function isQrSessionCryptoError(errorLike) {
@@ -162,6 +163,10 @@ async function clearScheduledSessionBackup(userId) {
   sessionBackupTimers.delete(userId);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function listSessionFilesRecursive(rootDir) {
   const entries = await fs.readdir(rootDir, { withFileTypes: true });
   const files = [];
@@ -202,7 +207,11 @@ async function readStoredSessionBackup(userId) {
     }
 
     const restored = JSON.parse(decrypted);
-    if (!restored?.files || typeof restored.files !== "object") {
+    if (
+      !restored?.files ||
+      typeof restored.files !== "object" ||
+      !Object.prototype.hasOwnProperty.call(restored.files, "creds.json")
+    ) {
       return null;
     }
 
@@ -271,6 +280,11 @@ async function persistSessionBackup(userId) {
     return false;
   }
 
+  const hasCredsFile = files.some((filePath) => path.basename(filePath) === "creds.json");
+  if (!hasCredsFile) {
+    return false;
+  }
+
   const payload = {
     userId,
     updatedAt: nowIso(),
@@ -330,6 +344,52 @@ function scheduleSessionBackup(userId) {
     });
   }, 900);
   sessionBackupTimers.set(userId, timer);
+}
+
+function trackSessionCredFlush(userId, promise) {
+  const trackedPromise = promise.finally(() => {
+    if (sessionCredFlushPromises.get(userId) === trackedPromise) {
+      sessionCredFlushPromises.delete(userId);
+    }
+  });
+
+  sessionCredFlushPromises.set(userId, trackedPromise);
+  return trackedPromise;
+}
+
+async function waitForSavedSessionCreds(userId, { attempts = 12, delayMs = 250 } = {}) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await hasSavedSessionFiles(userId)) {
+      return true;
+    }
+
+    if (attempt < attempts - 1) {
+      await sleep(delayMs);
+    }
+  }
+
+  return hasSavedSessionFiles(userId);
+}
+
+async function flushSessionCreds(userId, saveCreds) {
+  const inFlightFlush = sessionCredFlushPromises.get(userId);
+  if (inFlightFlush) {
+    const flushed = await inFlightFlush.catch(() => false);
+    if (flushed && (await hasSavedSessionFiles(userId))) {
+      return true;
+    }
+  }
+
+  const flushPromise = Promise.resolve()
+    .then(() => ensureSessionDirExists(userId))
+    .then(() => saveCreds())
+    .then(() => waitForSavedSessionCreds(userId))
+    .catch((error) => {
+      console.error(`[ReachIQ][qr] forced creds flush failed for ${userId}`, error);
+      return false;
+    });
+
+  return trackSessionCredFlush(userId, flushPromise);
 }
 
 async function restoreSessionFilesFromBackup(userId) {
@@ -664,17 +724,26 @@ async function buildSocket(userId, forceFresh = false) {
     )
   });
 
-  sock.ev.on("creds.update", (...args) => {
-    Promise.resolve()
+  sock.ev.on("creds.update", () => {
+    const flushPromise = Promise.resolve()
       .then(() => ensureSessionDirExists(userId))
-      .then(() => saveCreds(...args))
+      .then(() => saveCreds())
+      .then(() => waitForSavedSessionCreds(userId))
       .catch((error) => {
         console.error(`[ReachIQ][qr] creds.update save failed for ${userId}`, error);
-        return;
+        return false;
       })
-      .then(() => {
-        scheduleSessionBackup(userId);
+      .then((saved) => {
+        if (saved) {
+          scheduleSessionBackup(userId);
+          return true;
+        }
+
+        console.warn(`[ReachIQ][qr] creds.update finished without durable creds.json for ${userId}`);
+        return false;
       });
+
+    trackSessionCredFlush(userId, flushPromise);
   });
   sessionSockets.set(userId, sock);
 
@@ -730,6 +799,56 @@ async function buildSocket(userId, forceFresh = false) {
           socketUser.split(":")[0] || snapshotBeforeSave.phoneNumber || ""
         );
         const activeAt = nowIso();
+        setSessionState(userId, {
+          status: "connecting",
+          qrImage: null,
+          expiresAt: null,
+          phoneNumber: phoneNumber || snapshotBeforeSave.phoneNumber || null,
+          socketUser: socketUser || snapshotBeforeSave.socketUser || null,
+          lastActiveAt: activeAt
+        });
+        await clearQrExpiry(userId);
+        await persistQrConnectionState(userId, {
+          status: "connecting",
+          phoneNumber: phoneNumber || snapshotBeforeSave.phoneNumber || null,
+          socketUser: socketUser || snapshotBeforeSave.socketUser || null,
+          lastActiveAt: activeAt
+        });
+        let durableCredsPersisted = false;
+        try {
+          durableCredsPersisted = await flushSessionCreds(userId, saveCreds);
+        } catch (error) {
+          console.error(`[ReachIQ][qr] failed to flush connected session creds for ${userId}`, error);
+        }
+
+        let durableBackupPersisted = false;
+        try {
+          if (durableCredsPersisted) {
+            durableBackupPersisted = await persistSessionBackupWithRetry(userId, {
+              attempts: 8,
+              delayMs: 1000
+            });
+          }
+        } catch (error) {
+          console.error(`[ReachIQ][qr] failed to persist durable WhatsApp backup for ${userId}`, error);
+        }
+        if (!durableCredsPersisted) {
+          console.warn(`[ReachIQ][qr] durable creds.json not confirmed for ${userId}; keeping session in connecting state until storage succeeds`);
+          emitToSubscribers(userId, {
+            type: "status",
+            status: "connecting",
+            phoneNumber: phoneNumber || snapshotBeforeSave.phoneNumber || null,
+            lastActiveAt: activeAt
+          });
+          ensureQrSessionBackup(userId);
+          scheduleSessionBackup(userId);
+          return;
+        }
+
+        if (!durableBackupPersisted) {
+          console.warn(`[ReachIQ][qr] durable WhatsApp backup not yet confirmed for ${userId}; using local auth state and keeping retry backup scheduled`);
+          ensureQrSessionBackup(userId);
+        }
 
         setSessionState(userId, {
           status: "connected",
@@ -739,31 +858,15 @@ async function buildSocket(userId, forceFresh = false) {
           socketUser: socketUser || snapshotBeforeSave.socketUser || null,
           lastActiveAt: activeAt
         });
-        await clearQrExpiry(userId);
         await persistQrConnectionState(userId, {
           status: "connected",
           phoneNumber: phoneNumber || snapshotBeforeSave.phoneNumber || null,
           socketUser: socketUser || snapshotBeforeSave.socketUser || null,
           lastActiveAt: activeAt
         });
-        let durableBackupPersisted = false;
-        try {
-          durableBackupPersisted = await persistSessionBackupWithRetry(userId, {
-            attempts: 8,
-            delayMs: 1000
-          });
-        } catch (error) {
-          console.error(`[ReachIQ][qr] failed to persist durable WhatsApp backup for ${userId}`, error);
-        }
-        if (!durableBackupPersisted) {
-          console.warn(`[ReachIQ][qr] durable WhatsApp backup not yet confirmed for ${userId}; keeping retry backup scheduled`);
-        }
         await resumeAwaitingWhatsAppCampaigns(userId, "qr_reconnected").catch((error) => {
           console.warn(`[ReachIQ][qr] could not resume awaiting campaigns for ${userId}: ${error.message}`);
         });
-        if (!durableBackupPersisted) {
-          ensureQrSessionBackup(userId);
-        }
         scheduleSessionBackup(userId);
         const snapshot = getQRSessionSnapshot(userId);
         emitToSubscribers(userId, {
@@ -807,6 +910,28 @@ async function buildSocket(userId, forceFresh = false) {
               console.error(`[ReachIQ][qr] restart required reconnect failed for ${userId}`, error);
             });
           }, 750);
+          return;
+        }
+
+        const hasRecoverableAuth = await hasRecoverableQrAuthState(userId).catch(() => false);
+        if (hasRecoverableAuth) {
+          setSessionState(userId, {
+            status: "connecting",
+            qrImage: null,
+            expiresAt: null
+          });
+          emitToSubscribers(userId, { type: "status", status: "connecting" });
+          await persistQrConnectionState(userId, {
+            status: "connecting"
+          }).catch((error) => {
+            console.warn(`[ReachIQ][qr] could not persist recoverable close state for ${userId}: ${error.message}`);
+          });
+
+          setTimeout(() => {
+            void buildSocket(userId, false).catch((error) => {
+              console.error(`[ReachIQ][qr] recoverable reconnect failed for ${userId}`, error);
+            });
+          }, 1500);
           return;
         }
 

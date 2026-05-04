@@ -107,7 +107,7 @@ async function buildStoredQrRecoverableStatus(userId, connections = []) {
   return {
     connected: false,
     providerType: "qr",
-    status: "disconnected",
+    status: "connecting",
     phoneNumber: stored.phoneNumber || null,
     lastActiveAt: null,
     sessionData: stored.socketUser ? { socketUser: stored.socketUser } : {},
@@ -120,24 +120,6 @@ async function buildStoredQrRecoverableStatus(userId, connections = []) {
 }
 
 async function buildStaleQrDisconnectedStatus(userId, connection, connections = []) {
-  let refreshedConnections = connections;
-  if (connection?.provider_type === "qr" && hasRecoverableQrConnection(connections)) {
-    try {
-      await disconnectWhatsAppProvider(userId, "qr");
-      refreshedConnections = await getAllWhatsAppConnections(userId);
-    } catch (error) {
-      console.warn(`[ReachIQ][qr] could not mark stale QR connection disconnected for ${userId}: ${error.message}`);
-      refreshedConnections = connections.map((item) =>
-        item.provider_type === "qr"
-          ? {
-              ...item,
-              status: "disconnected"
-            }
-          : item
-      );
-    }
-  }
-
   return {
     connected: false,
     providerType: "qr",
@@ -148,7 +130,16 @@ async function buildStaleQrDisconnectedStatus(userId, connection, connections = 
     qrImage: null,
     expiresAt: null,
     metaVerified: false,
-    connections: refreshedConnections.map(serializeConnectionForClient)
+    connections: connections.map((item) =>
+      serializeConnectionForClient(
+        item?.provider_type === "qr"
+          ? {
+              ...item,
+              status: "disconnected"
+            }
+          : item
+      )
+    )
   };
 }
 

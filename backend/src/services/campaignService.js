@@ -293,7 +293,7 @@ export async function processCampaignMessages({ campaignId, userId }) {
       await supabaseAdmin
         .from("campaign_leads")
         .update({
-          status: "failed",
+          status: reconnectableWhatsAppError ? "pending" : "failed",
           error_message: surfacedMessage
         })
         .eq("id", item.id);
@@ -306,7 +306,7 @@ export async function processCampaignMessages({ campaignId, userId }) {
           campaign_id: campaignId,
           campaign_lead_id: item.id,
           lead_id: item.lead_id,
-          send_status: "failed",
+          send_status: reconnectableWhatsAppError ? "pending" : "failed",
           generation_error: surfacedMessage
         }
       });

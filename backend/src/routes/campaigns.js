@@ -7,6 +7,9 @@ import { refreshCampaignMetrics } from "../services/campaignService.js";
 import { getCampaignAutomationConfig, removeCampaignAutomationConfig, setCampaignAutomationConfig, upsertCompatLeadPreparation } from "../services/campaignAutomationCompatService.js";
 import { createNotification } from "../services/notificationService.js";
 import { getCampaignPreparations } from "../services/outreachPreparationService.js";
+import { resumeAwaitingWhatsAppCampaigns } from "../services/campaignQueueService.js";
+import { getActiveWhatsAppConnection } from "../services/whatsappConnectionService.js";
+import { getQRSessionSnapshot, restoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
 import { createDemoCampaign, getDemoCampaignById, getDemoCampaigns, isDemoMode, launchDemoCampaign, updateDemoCampaign } from "../utils/demo.js";
 
 const router = express.Router();
@@ -41,6 +44,33 @@ async function queueCampaignProcessing(campaignId, userId, reason = "launch") {
   void processCampaignMessages({ campaignId, userId }).catch((queueError) => {
     console.error(`[Campaign ${reason}] ${queueError.message}`);
   });
+}
+
+async function hasLiveCampaignSenderConnection(userId) {
+  const activeConnection = await getActiveWhatsAppConnection(userId).catch(() => null);
+  if (activeConnection?.provider_type === "meta" && activeConnection.status === "connected") {
+    return true;
+  }
+
+  const qrSnapshot = getQRSessionSnapshot(userId);
+  if (qrSnapshot.status === "connected") {
+    return true;
+  }
+
+  const restoredQrSnapshot = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  return restoredQrSnapshot?.status === "connected";
+}
+
+async function loadCampaignById(campaignId, userId) {
+  const { data, error } = await supabaseAdmin
+    .from("campaigns")
+    .select("*, campaign_leads(*, leads(*)), follow_ups(*)")
+    .eq("id", campaignId)
+    .eq("user_id", userId)
+    .single();
+
+  if (error) throw error;
+  return data;
 }
 
 router.get("/", async (req, res, next) => {
@@ -203,15 +233,16 @@ router.get("/:id", async (req, res, next) => {
       return res.json(campaign);
     }
 
-    const { data, error } = await supabaseAdmin
-      .from("campaigns")
-      .select("*, campaign_leads(*, leads(*)), follow_ups(*)")
-      .eq("id", req.params.id)
-      .eq("user_id", req.user.id)
-      .single();
+    let data = await loadCampaignById(req.params.id, req.user.id);
+    if (data.status === "awaiting_whatsapp" && (await hasLiveCampaignSenderConnection(req.user.id))) {
+      await resumeAwaitingWhatsAppCampaigns(req.user.id, "campaign_detail_connected").catch((resumeError) => {
+        console.warn(`[ReachIQ][campaigns] could not resume awaiting campaign ${req.params.id} for ${req.user.id}: ${resumeError.message}`);
+      });
+      data = await loadCampaignById(req.params.id, req.user.id);
+    }
 
-    if (error) throw error;
     await refreshCampaignMetrics(req.params.id);
+    data = await loadCampaignById(req.params.id, req.user.id);
     const preparations = await getCampaignPreparations(req.params.id);
     const automationConfig = await getCampaignAutomationConfig(req.params.id);
     res.json({
