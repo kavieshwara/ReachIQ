@@ -4,7 +4,8 @@ import { decryptSecret, getActiveWhatsAppConnection } from "./whatsappConnection
 import { releaseGeneratedWebsiteVideo } from "./videoCaptureService.js";
 import {
   getQRSessionSnapshot,
-  restoreQRSessionIfAvailable,
+  scheduleQRSessionRestore,
+  tryRestoreQRSessionIfAvailable,
   sendQrTextMessage,
   sendQrVideoMessage
 } from "./whatsappQRService.js";
@@ -32,7 +33,10 @@ async function resolveActiveConnection(userId) {
     }
   }
 
-  const restoredQr = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  const restoredQr = await tryRestoreQRSessionIfAvailable(userId, {
+    timeoutMs: 1500,
+    reason: "whatsapp_service"
+  }).catch(() => null);
   if (restoredQr?.status === "connected") {
     return {
       provider_type: "qr",
@@ -46,6 +50,7 @@ async function resolveActiveConnection(userId) {
   }
 
   if (connection?.provider_type === "qr") {
+    scheduleQRSessionRestore(userId, { reason: "whatsapp_service_retry" });
     return connection
       ? {
           ...connection,

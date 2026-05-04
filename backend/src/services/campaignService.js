@@ -3,7 +3,7 @@ import { interpolateTemplate, nowIso, sleep, withTimestampError } from "../utils
 import { prepareCampaignLeadOutreach } from "./outreachPreparationService.js";
 import { getCampaignAutomationConfig, upsertCompatLeadPreparation } from "./campaignAutomationCompatService.js";
 import { getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
-import { getQRSessionSnapshot, restoreQRSessionIfAvailable } from "./whatsappQRService.js";
+import { getQRSessionSnapshot, scheduleQRSessionRestore, tryRestoreQRSessionIfAvailable } from "./whatsappQRService.js";
 import { sendUserTextMessage, sendUserVideoMessage } from "./whatsappService.js";
 import { ensureDailyUsageWindow } from "../utils/dailyUsage.js";
 
@@ -117,7 +117,10 @@ async function resolveCampaignConnection(userId) {
     }
   }
 
-  const restoredQr = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  const restoredQr = await tryRestoreQRSessionIfAvailable(userId, {
+    timeoutMs: 1500,
+    reason: "campaign_service"
+  }).catch(() => null);
   if (restoredQr?.status === "connected") {
     return {
       provider_type: "qr",
@@ -131,6 +134,7 @@ async function resolveCampaignConnection(userId) {
   }
 
   if (activeConnection?.provider_type === "qr") {
+    scheduleQRSessionRestore(userId, { reason: "campaign_service_retry" });
     return activeConnection
       ? {
           ...activeConnection,

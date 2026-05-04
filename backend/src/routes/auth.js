@@ -2,7 +2,7 @@ import express from "express";
 import { supabaseAdmin } from "../utils/supabase.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getActiveWhatsAppConnection } from "../services/whatsappConnectionService.js";
-import { getQRSessionSnapshot, restoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
+import { getQRSessionSnapshot, scheduleQRSessionRestore, tryRestoreQRSessionIfAvailable } from "../services/whatsappQRService.js";
 
 const router = express.Router();
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -12,9 +12,14 @@ router.get("/me", requireAuth, async (req, res, next) => {
     const connection = await getActiveWhatsAppConnection(req.user.id);
     let qrSnapshot = getQRSessionSnapshot(req.user.id);
     if (connection?.provider_type === "qr" && qrSnapshot.status !== "connected") {
-      const restoredQr = await restoreQRSessionIfAvailable(req.user.id).catch(() => null);
+      const restoredQr = await tryRestoreQRSessionIfAvailable(req.user.id, {
+        timeoutMs: 1500,
+        reason: "auth_me"
+      }).catch(() => null);
       if (restoredQr) {
         qrSnapshot = restoredQr;
+      } else {
+        scheduleQRSessionRestore(req.user.id, { reason: "auth_me_retry" });
       }
     }
     const whatsappConnected = Boolean(

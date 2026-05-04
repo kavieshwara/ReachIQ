@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "../utils/supabase.js";
 import { nowIso, withTimestampError } from "../utils/helpers.js";
 import { getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
-import { getQRSessionSnapshot, restoreQRSessionIfAvailable } from "./whatsappQRService.js";
+import { getQRSessionSnapshot, scheduleQRSessionRestore, tryRestoreQRSessionIfAvailable } from "./whatsappQRService.js";
 import { sendUserTextMessage } from "./whatsappService.js";
 import { getLiveMessageAllowance, incrementMessageCount } from "./campaignService.js";
 
@@ -18,7 +18,10 @@ async function resolveFollowUpConnection(userId) {
     }
   }
 
-  const restoredQr = await restoreQRSessionIfAvailable(userId).catch(() => null);
+  const restoredQr = await tryRestoreQRSessionIfAvailable(userId, {
+    timeoutMs: 1500,
+    reason: "followup_service"
+  }).catch(() => null);
   if (restoredQr?.status === "connected") {
     return {
       provider_type: "qr",
@@ -29,6 +32,10 @@ async function resolveFollowUpConnection(userId) {
         restoredFromDisk: true
       }
     };
+  }
+
+  if (activeConnection?.provider_type === "qr") {
+    scheduleQRSessionRestore(userId, { reason: "followup_service_retry" });
   }
 
   return activeConnection;

@@ -24,9 +24,9 @@ import {
   getQRSessionSnapshot,
   getStoredLinkedQrSessionInfo,
   removeQRSubscriber,
-  restoreQRSessionIfAvailable,
   scheduleQRSessionRestore,
-  startOrRestoreQRSession
+  startOrRestoreQRSession,
+  tryRestoreQRSessionIfAvailable
 } from "../services/whatsappQRService.js";
 import {
   persistWebhookStatus,
@@ -81,10 +81,10 @@ async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
     };
   }
 
-  const restored = await Promise.race([
-    restoreQRSessionIfAvailable(userId).catch(() => null),
-    new Promise((resolve) => setTimeout(() => resolve(null), 2500))
-  ]);
+  const restored = await tryRestoreQRSessionIfAvailable(userId, {
+    timeoutMs: 2200,
+    reason: "status_route"
+  }).catch(() => null);
   if (restored) {
     snapshot = restored;
   } else {
