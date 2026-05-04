@@ -700,6 +700,50 @@ export async function restoreQRSessionIfAvailable(userId) {
   return getQRSessionSnapshot(userId);
 }
 
+async function buildSocketWithSingleFlight(userId, { forceFresh = false, reason = "start" } = {}) {
+  const existingSocket = sessionSockets.get(userId);
+  if (existingSocket && !forceFresh) {
+    return getQRSessionSnapshot(userId);
+  }
+
+  const existingRestore = sessionRestorePromises.get(userId);
+  if (existingRestore && !forceFresh) {
+    await existingRestore;
+    return getQRSessionSnapshot(userId);
+  }
+
+  sessionLastRestoreAttemptAt.set(userId, Date.now());
+
+  const buildPromise = (async () => {
+    const current = getQRSessionSnapshot(userId);
+    if (current.status === "disconnected" || current.status === "expired") {
+      setSessionState(userId, {
+        status: "connecting",
+        qrImage: null,
+        expiresAt: null
+      });
+      emitToSubscribers(userId, { type: "status", status: "connecting" });
+      await persistQrConnectionState(userId, {
+        status: "connecting"
+      }).catch((error) => {
+        console.error(`[ReachIQ][qr] failed to persist ${reason} state for ${userId}`, error);
+      });
+    }
+
+    await buildSocket(userId, forceFresh);
+  })();
+
+  sessionRestorePromises.set(userId, buildPromise);
+
+  try {
+    await buildPromise;
+  } finally {
+    sessionRestorePromises.delete(userId);
+  }
+
+  return getQRSessionSnapshot(userId);
+}
+
 export async function tryRestoreQRSessionIfAvailable(
   userId,
   { timeoutMs = QR_ROUTE_RESTORE_TIMEOUT_MS, reason = "route" } = {}
@@ -1012,11 +1056,11 @@ async function buildSocket(userId, forceFresh = false) {
             status: "connecting"
           });
 
-          setTimeout(() => {
-            void buildSocket(userId, false).catch((error) => {
-              console.error(`[ReachIQ][qr] restart required reconnect failed for ${userId}`, error);
-            });
-          }, 750);
+          scheduleQRSessionRestore(userId, {
+            reason: "restart_required",
+            force: true,
+            delayMs: 750
+          });
           return;
         }
 
@@ -1055,11 +1099,11 @@ async function buildSocket(userId, forceFresh = false) {
             console.warn(`[ReachIQ][qr] could not persist recoverable close state for ${userId}: ${error.message}`);
           });
 
-          setTimeout(() => {
-            void buildSocket(userId, false).catch((error) => {
-              console.error(`[ReachIQ][qr] recoverable reconnect failed for ${userId}`, error);
-            });
-          }, 1500);
+          scheduleQRSessionRestore(userId, {
+            reason: "recoverable_close",
+            force: true,
+            delayMs: 1500
+          });
           return;
         }
 
@@ -1106,8 +1150,14 @@ export async function startOrRestoreQRSession(userId, { forceFresh = false } = {
     return getQRSessionSnapshot(userId);
   }
 
-  await buildSocket(userId, forceFresh);
-  return getQRSessionSnapshot(userId);
+  if (!forceFresh) {
+    return restoreQRSessionIfAvailable(userId);
+  }
+
+  return buildSocketWithSingleFlight(userId, {
+    forceFresh: true,
+    reason: "force_fresh_start"
+  });
 }
 
 export function addQRSubscriber(userId, res) {
