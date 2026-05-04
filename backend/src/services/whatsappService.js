@@ -186,8 +186,8 @@ export async function sendUserVideoMessage({ userId, toPhone, videoUrl, caption 
       return;
     }
 
-    await releaseGeneratedWebsiteVideo(generatedVideoId).catch((error) => {
-      console.warn(`[ReachIQ][video] could not clear local generated video ${generatedVideoId} after send: ${error.message}`);
+    await releaseGeneratedWebsiteVideo(generatedVideoId, { removeStorage: true }).catch((error) => {
+      console.warn(`[ReachIQ][video] could not clear generated video ${generatedVideoId} after send: ${error.message}`);
     });
   };
 

@@ -79,9 +79,8 @@ async function invalidatePoisonedQrSession(userId, reason) {
     // Best-effort backup only.
   }
 
-  const canSafelyClearAuth = await hasStoredSessionBackup(userId).catch(() => false);
-  await disconnectQRSession(userId, { clearAuth: canSafelyClearAuth }).catch((error) => {
-    console.warn(`[ReachIQ][qr] failed to fully clear poisoned session for ${userId}: ${error.message}`);
+  await disconnectQRSession(userId, { clearAuth: false }).catch((error) => {
+    console.warn(`[ReachIQ][qr] failed to soft-reset poisoned session for ${userId}: ${error.message}`);
   });
   resetQrCryptoFailures(userId);
 }
@@ -110,37 +109,14 @@ function recordQrCryptoFailure(userId, details = "") {
 }
 
 function wrapBaileysLogger(userId, logger) {
-  const intercept = (level, value) => {
-    if (typeof value === "function") {
-      return value.bind(logger);
-    }
-
-    return (...args) => {
-      try {
-        const text = args.map((entry) => {
-          if (typeof entry === "string") return entry;
-          const message = entry?.err?.message || entry?.message || entry?.msg;
-          return message ? String(message) : "";
-        }).join(" ");
-
-        if (isQrSessionCryptoError(text)) {
-          recordQrCryptoFailure(userId, text);
-        }
-      } catch {
-        // Ignore logger interception failures and preserve original logging behavior.
-      }
-
-      return value.apply(logger, args);
-    };
-  };
-
   return new Proxy(logger, {
     get(target, prop, receiver) {
       if (prop === "child") {
         return (...args) => wrapBaileysLogger(userId, target.child(...args));
       }
 
-      return intercept(prop, Reflect.get(target, prop, receiver));
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? value.bind(logger) : value;
     }
   });
 }
@@ -884,12 +860,13 @@ async function buildSocket(userId, forceFresh = false) {
           : lastDisconnect?.error?.output?.statusCode;
         const shouldLogout = statusCode === DisconnectReason.loggedOut;
         const shouldRestart = statusCode === DisconnectReason.restartRequired;
+        const hasRecoverableAuth = await hasRecoverableQrAuthState(userId).catch(() => false);
 
         sessionSockets.delete(userId);
         await clearQrExpiry(userId);
 
         if (shouldLogout) {
-          await disconnectQRSession(userId, { clearAuth: true });
+          await disconnectQRSession(userId, { clearAuth: !hasRecoverableAuth });
           emitToSubscribers(userId, { type: "status", status: "disconnected" });
           return;
         }
@@ -913,7 +890,6 @@ async function buildSocket(userId, forceFresh = false) {
           return;
         }
 
-        const hasRecoverableAuth = await hasRecoverableQrAuthState(userId).catch(() => false);
         if (hasRecoverableAuth) {
           setSessionState(userId, {
             status: "connecting",
