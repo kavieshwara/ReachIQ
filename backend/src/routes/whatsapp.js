@@ -20,6 +20,7 @@ import {
   ensureQrSessionBackup,
   hasActiveQrSocket,
   hasLiveQrSocket,
+  getVerifiedQrSessionState,
   hasRecoverableQrAuthState,
   getQRSessionSnapshot,
   getStoredLinkedQrSessionInfo,
@@ -52,20 +53,7 @@ function buildQrStatusFromSnapshot(snapshot) {
 }
 
 async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
-  let snapshot = getQRSessionSnapshot(userId);
-  const hasConnectedSocket = hasLiveQrSocket(userId);
-  const hasSocket = hasActiveQrSocket(userId);
-
-  if (snapshot.status === "connected" && hasConnectedSocket) {
-    return snapshot;
-  }
-
-  if ((snapshot.status === "connecting" || snapshot.status === "waiting_for_scan") && hasSocket) {
-    return snapshot;
-  }
-
   const hasRecoverableAuth = await hasRecoverableQrAuthState(userId).catch(() => false);
-
   const shouldAttemptRestore = Boolean(
     activeConnection?.provider_type === "qr" ||
     hasRecoverableQrConnection(allConnections) ||
@@ -73,6 +61,7 @@ async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
   );
 
   if (!shouldAttemptRestore) {
+    const snapshot = getQRSessionSnapshot(userId);
     return {
       ...snapshot,
       status: "disconnected",
@@ -81,17 +70,26 @@ async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
     };
   }
 
-  const restored = await tryRestoreQRSessionIfAvailable(userId, {
+  const verified = await getVerifiedQrSessionState(userId, {
     timeoutMs: 2200,
     reason: "status_route"
-  }).catch(() => null);
-  if (restored) {
-    snapshot = restored;
-  } else {
-    scheduleQRSessionRestore(userId, { reason: "status_route_retry" });
-    snapshot = getQRSessionSnapshot(userId);
+  });
+  const snapshot = verified.snapshot;
+
+  if (verified.connected || ((snapshot.status === "connecting" || snapshot.status === "waiting_for_scan") && hasActiveQrSocket(userId))) {
+    return snapshot;
   }
 
+  if (!verified.recoverable) {
+    return {
+      ...snapshot,
+      status: "disconnected",
+      qrImage: null,
+      expiresAt: null
+    };
+  }
+
+  scheduleQRSessionRestore(userId, { reason: "status_route_retry" });
   return snapshot;
 }
 

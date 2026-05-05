@@ -3,7 +3,7 @@ import { interpolateTemplate, nowIso, sleep, withTimestampError } from "../utils
 import { prepareCampaignLeadOutreach } from "./outreachPreparationService.js";
 import { getCampaignAutomationConfig, upsertCompatLeadPreparation } from "./campaignAutomationCompatService.js";
 import { getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
-import { getQRSessionSnapshot, scheduleQRSessionRestore, tryRestoreQRSessionIfAvailable } from "./whatsappQRService.js";
+import { getVerifiedQrSessionState } from "./whatsappQRService.js";
 import { sendUserTextMessage, sendUserVideoMessage } from "./whatsappService.js";
 import { ensureDailyUsageWindow } from "../utils/dailyUsage.js";
 
@@ -110,37 +110,34 @@ async function resolveCampaignConnection(userId) {
     return activeConnection;
   }
 
-  if (activeConnection?.provider_type === "qr") {
-    const liveSnapshot = getQRSessionSnapshot(userId);
-    if (liveSnapshot.status === "connected") {
-      return activeConnection;
-    }
-  }
-
-  const restoredQr = await tryRestoreQRSessionIfAvailable(userId, {
+  const qrState = await getVerifiedQrSessionState(userId, {
     timeoutMs: 1500,
     reason: "campaign_service"
-  }).catch(() => null);
-  if (restoredQr?.status === "connected") {
+  });
+  if (qrState.connected) {
     return {
       provider_type: "qr",
       status: "connected",
-      phone_number: restoredQr.phoneNumber,
+      phone_number: qrState.snapshot.phoneNumber,
       session_data: {
-        socketUser: restoredQr.socketUser,
-        restoredFromDisk: true
+        socketUser: qrState.snapshot.socketUser,
+        restoredFromDisk: qrState.restored || undefined
       }
     };
   }
 
-  if (activeConnection?.provider_type === "qr") {
-    scheduleQRSessionRestore(userId, { reason: "campaign_service_retry" });
+  if (activeConnection?.provider_type === "qr" || qrState.recoverable) {
     return activeConnection
       ? {
           ...activeConnection,
           status: "disconnected"
         }
-      : null;
+      : {
+          provider_type: "qr",
+          status: "disconnected",
+          phone_number: qrState.snapshot.phoneNumber || null,
+          session_data: qrState.snapshot.socketUser ? { socketUser: qrState.snapshot.socketUser } : {}
+        };
   }
 
   return activeConnection ?? null;

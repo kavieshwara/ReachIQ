@@ -3,9 +3,7 @@ import { normalizeWhatsAppPhone, withTimestampError } from "../utils/helpers.js"
 import { decryptSecret, getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
 import { releaseGeneratedWebsiteVideo } from "./videoCaptureService.js";
 import {
-  getQRSessionSnapshot,
-  scheduleQRSessionRestore,
-  tryRestoreQRSessionIfAvailable,
+  getVerifiedQrSessionState,
   sendQrTextMessage,
   sendQrVideoMessage
 } from "./whatsappQRService.js";
@@ -26,37 +24,34 @@ async function resolveActiveConnection(userId) {
     return connection;
   }
 
-  if (connection?.provider_type === "qr") {
-    const liveSnapshot = getQRSessionSnapshot(userId);
-    if (liveSnapshot.status === "connected") {
-      return connection;
-    }
-  }
-
-  const restoredQr = await tryRestoreQRSessionIfAvailable(userId, {
+  const qrState = await getVerifiedQrSessionState(userId, {
     timeoutMs: 1500,
     reason: "whatsapp_service"
-  }).catch(() => null);
-  if (restoredQr?.status === "connected") {
+  });
+  if (qrState.connected) {
     return {
       provider_type: "qr",
       status: "connected",
-      phone_number: restoredQr.phoneNumber,
+      phone_number: qrState.snapshot.phoneNumber,
       session_data: {
-        socketUser: restoredQr.socketUser,
-        restoredFromDisk: true
+        socketUser: qrState.snapshot.socketUser,
+        restoredFromDisk: qrState.restored || undefined
       }
     };
   }
 
-  if (connection?.provider_type === "qr") {
-    scheduleQRSessionRestore(userId, { reason: "whatsapp_service_retry" });
+  if (connection?.provider_type === "qr" || qrState.recoverable) {
     return connection
       ? {
           ...connection,
           status: "disconnected"
         }
-      : null;
+      : {
+          provider_type: "qr",
+          status: "disconnected",
+          phone_number: qrState.snapshot.phoneNumber || null,
+          session_data: qrState.snapshot.socketUser ? { socketUser: qrState.snapshot.socketUser } : {}
+        };
   }
 
   return connection ?? null;

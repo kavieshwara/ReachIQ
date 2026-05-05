@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "../utils/supabase.js";
 import { nowIso, withTimestampError } from "../utils/helpers.js";
 import { getActiveWhatsAppConnection } from "./whatsappConnectionService.js";
-import { getQRSessionSnapshot, scheduleQRSessionRestore, tryRestoreQRSessionIfAvailable } from "./whatsappQRService.js";
+import { getVerifiedQrSessionState } from "./whatsappQRService.js";
 import { sendUserTextMessage } from "./whatsappService.js";
 import { getLiveMessageAllowance, incrementMessageCount } from "./campaignService.js";
 
@@ -11,34 +11,37 @@ async function resolveFollowUpConnection(userId) {
     return activeConnection;
   }
 
-  if (activeConnection?.provider_type === "qr") {
-    const liveSnapshot = getQRSessionSnapshot(userId);
-    if (liveSnapshot.status === "connected") {
-      return activeConnection;
-    }
-  }
-
-  const restoredQr = await tryRestoreQRSessionIfAvailable(userId, {
+  const qrState = await getVerifiedQrSessionState(userId, {
     timeoutMs: 1500,
     reason: "followup_service"
-  }).catch(() => null);
-  if (restoredQr?.status === "connected") {
+  });
+  if (qrState.connected) {
     return {
       provider_type: "qr",
       status: "connected",
-      phone_number: restoredQr.phoneNumber,
+      phone_number: qrState.snapshot.phoneNumber,
       session_data: {
-        socketUser: restoredQr.socketUser,
-        restoredFromDisk: true
+        socketUser: qrState.snapshot.socketUser,
+        restoredFromDisk: qrState.restored || undefined
       }
     };
   }
 
-  if (activeConnection?.provider_type === "qr") {
-    scheduleQRSessionRestore(userId, { reason: "followup_service_retry" });
+  if (activeConnection?.provider_type === "qr" || qrState.recoverable) {
+    return activeConnection
+      ? {
+          ...activeConnection,
+          status: "disconnected"
+        }
+      : {
+          provider_type: "qr",
+          status: "disconnected",
+          phone_number: qrState.snapshot.phoneNumber || null,
+          session_data: qrState.snapshot.socketUser ? { socketUser: qrState.snapshot.socketUser } : {}
+        };
   }
 
-  return activeConnection;
+  return activeConnection ?? null;
 }
 
 export async function runDueFollowUps({ userId = null, followUpId = null, source = "app" } = {}) {

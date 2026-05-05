@@ -564,6 +564,10 @@ function setSessionState(userId, patch) {
   return next;
 }
 
+function isRecoveringQrSnapshot(snapshot) {
+  return snapshot.status === "connecting" || snapshot.status === "waiting_for_scan";
+}
+
 async function cleanupSessionFiles(userId) {
   const sessionDir = getSessionDir(userId);
   await fs.rm(sessionDir, { recursive: true, force: true }).catch(() => null);
@@ -617,12 +621,39 @@ export function hasLiveQrSocket(userId) {
   return Boolean(socket && snapshot.status === "connected" && socket.user?.id);
 }
 
+function hasRecoveringQrSocket(userId) {
+  const socket = sessionSockets.get(userId);
+  const snapshot = getQRSessionSnapshot(userId);
+  return Boolean(socket && isRecoveringQrSnapshot(snapshot));
+}
+
 export async function hasRecoverableQrAuthState(userId) {
   if (await hasSavedSessionFiles(userId)) {
     return true;
   }
 
   return hasStoredSessionBackup(userId).catch(() => false);
+}
+
+async function clearStaleQrSocketEntry(userId, reason = "stale_socket") {
+  const socket = sessionSockets.get(userId);
+  if (!socket) {
+    return false;
+  }
+
+  const snapshot = getQRSessionSnapshot(userId);
+  if (hasLiveQrSocket(userId) || isRecoveringQrSnapshot(snapshot)) {
+    return false;
+  }
+
+  sessionSockets.delete(userId);
+  try {
+    socket.end?.(new Error(`ReachIQ stale QR socket cleanup (${reason})`));
+  } catch {
+    // Best-effort cleanup only.
+  }
+
+  return true;
 }
 
 export function getQRSessionSnapshot(userId) {
@@ -685,7 +716,12 @@ export async function disconnectQRSession(userId, { clearAuth = true } = {}) {
 export async function restoreQRSessionIfAvailable(userId) {
   const existingSocket = sessionSockets.get(userId);
   if (existingSocket) {
-    return getQRSessionSnapshot(userId);
+    const snapshot = getQRSessionSnapshot(userId);
+    if (hasLiveQrSocket(userId) || isRecoveringQrSnapshot(snapshot)) {
+      return snapshot;
+    }
+
+    await clearStaleQrSocketEntry(userId, "restore_short_circuit");
   }
 
   let hasSavedSession = await hasSavedSessionFiles(userId);
@@ -735,7 +771,12 @@ export async function restoreQRSessionIfAvailable(userId) {
 async function buildSocketWithSingleFlight(userId, { forceFresh = false, reason = "start" } = {}) {
   const existingSocket = sessionSockets.get(userId);
   if (existingSocket && !forceFresh) {
-    return getQRSessionSnapshot(userId);
+    const snapshot = getQRSessionSnapshot(userId);
+    if (hasLiveQrSocket(userId) || isRecoveringQrSnapshot(snapshot)) {
+      return snapshot;
+    }
+
+    await clearStaleQrSocketEntry(userId, `${reason}_short_circuit`);
   }
 
   const existingRestore = sessionRestorePromises.get(userId);
@@ -832,6 +873,78 @@ export function scheduleQRSessionRestore(
 
   scheduledSessionRestores.set(userId, scheduledPromise);
   return true;
+}
+
+export async function getVerifiedQrSessionState(
+  userId,
+  { timeoutMs = QR_ROUTE_RESTORE_TIMEOUT_MS, reason = "verify", scheduleRetryReason = null, attemptRestore = true } = {}
+) {
+  let snapshot = getQRSessionSnapshot(userId);
+
+  if (hasLiveQrSocket(userId)) {
+    return {
+      connected: true,
+      live: true,
+      recoverable: true,
+      restored: false,
+      snapshot
+    };
+  }
+
+  if (hasRecoveringQrSocket(userId)) {
+    return {
+      connected: false,
+      live: false,
+      recoverable: true,
+      restored: false,
+      snapshot
+    };
+  }
+
+  await clearStaleQrSocketEntry(userId, reason);
+
+  let restored = null;
+  if (attemptRestore) {
+    restored = await tryRestoreQRSessionIfAvailable(userId, {
+      timeoutMs,
+      reason
+    }).catch(() => null);
+  }
+
+  snapshot = restored || getQRSessionSnapshot(userId);
+
+  if (hasLiveQrSocket(userId)) {
+    return {
+      connected: true,
+      live: true,
+      recoverable: true,
+      restored: Boolean(restored),
+      snapshot: getQRSessionSnapshot(userId)
+    };
+  }
+
+  if (hasRecoveringQrSocket(userId)) {
+    return {
+      connected: false,
+      live: false,
+      recoverable: true,
+      restored: Boolean(restored),
+      snapshot: getQRSessionSnapshot(userId)
+    };
+  }
+
+  const recoverable = await hasRecoverableQrAuthState(userId).catch(() => false);
+  if (scheduleRetryReason && recoverable) {
+    scheduleQRSessionRestore(userId, { reason: scheduleRetryReason });
+  }
+
+  return {
+    connected: false,
+    live: false,
+    recoverable,
+    restored: Boolean(restored),
+    snapshot: getQRSessionSnapshot(userId)
+  };
 }
 
 export async function restoreSavedQRSessionsOnBoot() {
@@ -1221,7 +1334,12 @@ export async function startOrRestoreQRSession(userId, { forceFresh = false } = {
 
   const existingSocket = sessionSockets.get(userId);
   if (existingSocket && !forceFresh) {
-    return getQRSessionSnapshot(userId);
+    const snapshot = getQRSessionSnapshot(userId);
+    if (hasLiveQrSocket(userId) || isRecoveringQrSnapshot(snapshot)) {
+      return snapshot;
+    }
+
+    await clearStaleQrSocketEntry(userId, "start_or_restore_short_circuit");
   }
 
   const existingRestore = sessionRestorePromises.get(userId);
@@ -1257,8 +1375,7 @@ export function removeQRSubscriber(userId, res) {
 
 function ensureQrSocket(userId) {
   const sock = sessionSockets.get(userId);
-  const snapshot = getQRSessionSnapshot(userId);
-  if (!sock || snapshot.status !== "connected") {
+  if (!sock || !hasLiveQrSocket(userId)) {
     const error = new Error("QR WhatsApp session is not connected.");
     error.status = 409;
     throw error;
@@ -1270,8 +1387,7 @@ async function waitForQrConnection(userId, timeoutMs = 20000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const sock = sessionSockets.get(userId);
-    const snapshot = getQRSessionSnapshot(userId);
-    if (sock && snapshot.status === "connected") {
+    if (sock && hasLiveQrSocket(userId)) {
       return sock;
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
