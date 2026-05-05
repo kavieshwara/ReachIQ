@@ -20,15 +20,22 @@ export const api = axios.create({
 
 let cachedAccessToken: string | null = null;
 let sessionLookupPromise: Promise<string | null> | null = null;
+let lastTokenLookupAt = 0;
+const tokenRefreshIntervalMs = 45_000;
 
 export const usageLimitEventName = "reachiq:usage-limit";
 
 export function setApiAccessToken(nextToken: string | null) {
   cachedAccessToken = nextToken;
+  lastTokenLookupAt = Date.now();
 }
 
-async function resolveAccessToken() {
-  if (cachedAccessToken) {
+async function resolveAccessToken(forceRefresh = false) {
+  const tokenIsFresh =
+    cachedAccessToken &&
+    Date.now() - lastTokenLookupAt < tokenRefreshIntervalMs;
+
+  if (!forceRefresh && tokenIsFresh) {
     return cachedAccessToken;
   }
 
@@ -43,6 +50,7 @@ async function resolveAccessToken() {
     } = await supabase.auth.getSession();
 
     cachedAccessToken = session?.access_token || null;
+    lastTokenLookupAt = Date.now();
     return cachedAccessToken;
   })().finally(() => {
     sessionLookupPromise = null;
@@ -64,6 +72,8 @@ api.interceptors.request.use(async (config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
+    const originalRequest = error?.config;
+
     if (typeof window !== "undefined" && error?.response?.status === 403) {
       const payload = error?.response?.data || {};
       const message = String(payload?.error || "");
@@ -87,6 +97,20 @@ api.interceptors.response.use(
 
     if (typeof window !== "undefined" && error?.response?.status === 401) {
       console.info("[ReachIQ][api] 401 response", error?.config?.url || "unknown-url");
+
+      if (originalRequest && !originalRequest.__reachiqRetried) {
+        originalRequest.__reachiqRetried = true;
+
+        const refreshedToken = await resolveAccessToken(true);
+        if (refreshedToken) {
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${refreshedToken}`;
+          return api.request(originalRequest);
+        }
+      }
+
+      cachedAccessToken = null;
+      lastTokenLookupAt = 0;
     }
 
     return Promise.reject(error);

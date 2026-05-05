@@ -40,8 +40,8 @@ const QR_RECONNECT_STORM_THRESHOLD = 5;
 const QR_SESSION_RECOVERY_MESSAGE = "ReachIQ detected a stale WhatsApp QR session. Refresh the QR session and reconnect WhatsApp.";
 const QR_DEFAULT_QUERY_TIMEOUT_MS = Math.max(15_000, Number(process.env.WHATSAPP_DEFAULT_QUERY_TIMEOUT_MS || 60_000));
 const QR_CONNECT_TIMEOUT_MS = Math.max(15_000, Number(process.env.WHATSAPP_CONNECT_TIMEOUT_MS || 30_000));
-const ENABLE_QR_SESSION_BACKUP = String(process.env.ENABLE_QR_SESSION_BACKUP || "false").toLowerCase() === "true";
-const ENABLE_QR_BACKGROUND_RESTORE = String(process.env.ENABLE_QR_BACKGROUND_RESTORE || "false").toLowerCase() === "true";
+const ENABLE_QR_SESSION_BACKUP = String(process.env.ENABLE_QR_SESSION_BACKUP || "true").toLowerCase() === "true";
+const ENABLE_QR_BACKGROUND_RESTORE = String(process.env.ENABLE_QR_BACKGROUND_RESTORE || "true").toLowerCase() === "true";
 
 const sessionSockets = new Map();
 const sessionState = new Map();

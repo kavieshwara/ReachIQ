@@ -56,7 +56,7 @@ async function hasLiveCampaignSenderConnection(userId) {
     timeoutMs: 1800,
     reason: "campaign_gate",
     scheduleRetryReason: "campaign_gate_retry",
-    attemptRestore: true
+    attemptRestore: false
   });
 
   return qrState.connected;

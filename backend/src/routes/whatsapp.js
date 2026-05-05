@@ -72,7 +72,8 @@ async function resolveLiveQrSnapshot(userId, activeConnection, allConnections) {
 
   const verified = await getVerifiedQrSessionState(userId, {
     timeoutMs: 2200,
-    reason: "status_route"
+    reason: "status_route",
+    attemptRestore: false
   });
   const snapshot = verified.snapshot;
 

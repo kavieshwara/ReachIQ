@@ -14,7 +14,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
       timeoutMs: 1500,
       reason: "auth_me",
       scheduleRetryReason: "auth_me_retry",
-      attemptRestore: connection?.provider_type === "qr"
+      attemptRestore: false
     });
     const whatsappConnected = Boolean(
       (connection?.provider_type !== "qr" && connection?.status === "connected") ||
